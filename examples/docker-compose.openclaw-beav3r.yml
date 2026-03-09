@@ -1,0 +1,31 @@
+version: '3.9'
+services:
+  beav3r:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ../:/app
+      - /Users/ndeto/.openclaw/workspace/beaver:/beaver
+    command: sh -c "echo 'TODO: replace with local beaver start command from /beaver repo' && tail -f /dev/null"
+    ports:
+      - '3000:3000'
+
+  bridge:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ../:/app
+    command: sh -c "npm ci && npm run -w @beav3r/openclaw-beav3r-bridge build"
+    environment:
+      - BRIDGE_CALLBACK_SECRET=secret
+    ports:
+      - '4400:4400'
+
+  plugin:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ../:/app
+    command: sh -c "npm ci && npm run -w @openclaw/openclaw-approvals build"
+    ports:
+      - '4500:4500'

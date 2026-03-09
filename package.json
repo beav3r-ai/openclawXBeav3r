@@ -1,0 +1,20 @@
+{
+  "name": "openclawxbeav3r",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run --workspaces build",
+    "test": "npm run --workspaces test",
+    "demo": "tsx examples/demo-simulate.ts",
+    "bridge": "npm run --workspace @beav3r/openclaw-beav3r-bridge start",
+    "plugin": "npm run --workspace @openclaw/openclaw-approvals start",
+    "plugin:openclaw": "npm run --workspace @openclaw/openclaw-approvals start:openclaw"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  }
+}

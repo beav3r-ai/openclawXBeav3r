@@ -5,11 +5,36 @@ import { ApprovalRecord, ApprovalStore, InMemoryApprovalStore } from './state/st
 import { BridgeConfig, CallbackDecision, HandoffPayloadV1 } from './types/contracts';
 import { hmac } from './utils/signature';
 
+type BridgeMetrics = {
+  handoffAcceptedTotal: number;
+  handoffAcceptedBeav3rTotal: number;
+  handoffAcceptedLocalTotal: number;
+  fetchDecisionErrorsTotal: number;
+  callbackDeliveryFailedTotal: number;
+  reconciledPendingTimeoutTotal: number;
+  deliveredTerminalTotal: number;
+  deliveredByStatus: Record<string, number>;
+  reconciliationLatencyMsCount: number;
+  reconciliationLatencyMsSum: number;
+};
+
 export class OpenClawBeav3rBridge {
   private requestToApproval = new Map<string, string>();
   private approvalToRequest = new Map<string, string>();
   private callbackDedupe = new Set<string>();
   private timer?: NodeJS.Timeout;
+  private metrics: BridgeMetrics = {
+    handoffAcceptedTotal: 0,
+    handoffAcceptedBeav3rTotal: 0,
+    handoffAcceptedLocalTotal: 0,
+    fetchDecisionErrorsTotal: 0,
+    callbackDeliveryFailedTotal: 0,
+    reconciledPendingTimeoutTotal: 0,
+    deliveredTerminalTotal: 0,
+    deliveredByStatus: {},
+    reconciliationLatencyMsCount: 0,
+    reconciliationLatencyMsSum: 0,
+  };
 
   constructor(private readonly cfg: BridgeConfig, private readonly beav3r: Beav3rClient, private readonly store: ApprovalStore = new InMemoryApprovalStore()) {}
 
@@ -24,6 +49,10 @@ export class OpenClawBeav3rBridge {
   app() {
     const app = express();
     app.use(express.json());
+
+    app.get('/metrics', (_req, res) => {
+      res.json(this.metricsSnapshot());
+    });
 
     app.post('/handoff', async (req, res) => {
       const p = req.body as HandoffPayloadV1;
@@ -82,6 +111,9 @@ export class OpenClawBeav3rBridge {
       }
 
       this.store.putIdempotency(p.idempotencyKey, rec);
+      this.metrics.handoffAcceptedTotal += 1;
+      if (route === 'beav3r') this.metrics.handoffAcceptedBeav3rTotal += 1;
+      if (route === 'local') this.metrics.handoffAcceptedLocalTotal += 1;
       this.log('handoff.accepted', { approvalId: p.approvalId, route, queued });
       return res.json({ approvalId: p.approvalId, status: 'accepted', route, queued });
     });
@@ -142,6 +174,7 @@ export class OpenClawBeav3rBridge {
           continue;
         }
       } catch {
+        this.metrics.fetchDecisionErrorsTotal += 1;
         this.log('beav3r.fetch_failed', { approvalId, requestId });
       }
 
@@ -161,7 +194,11 @@ export class OpenClawBeav3rBridge {
 
       const pendingForSec = Math.max(0, nowSec - Math.floor(rec.updatedAt / 1000));
       if (pendingForSec >= this.cfg.timeouts.pendingTimeoutSec) {
-        this.log('approval.stuck_reconciled', { approvalId, pendingForSec, requestId });
+        const reconciliationLatencyMs = Date.now() - rec.updatedAt;
+        this.metrics.reconciledPendingTimeoutTotal += 1;
+        this.metrics.reconciliationLatencyMsCount += 1;
+        this.metrics.reconciliationLatencyMsSum += reconciliationLatencyMs;
+        this.log('approval.stuck_reconciled', { approvalId, pendingForSec, requestId, reconciliationLatencyMs });
         await this.deliverTerminal(rec.payload.callback.url, {
           approvalId,
           status: 'timeout',
@@ -181,6 +218,8 @@ export class OpenClawBeav3rBridge {
     if (this.callbackDedupe.has(key)) return;
     this.callbackDedupe.add(key);
     this.store.markTerminal(cb.approvalId, cb);
+    this.metrics.deliveredTerminalTotal += 1;
+    this.metrics.deliveredByStatus[cb.status] = (this.metrics.deliveredByStatus[cb.status] ?? 0) + 1;
     await this.sendCallback(url, cb);
   }
 
@@ -197,7 +236,18 @@ export class OpenClawBeav3rBridge {
       }
       await new Promise((r) => setTimeout(r, this.cfg.callback.backoffMs * (i + 1)));
     }
+    this.metrics.callbackDeliveryFailedTotal += 1;
     this.log('callback.delivery_failed', { approvalId: cb.approvalId });
+  }
+
+  private metricsSnapshot() {
+    return {
+      ...this.metrics,
+      reconciliationLatencyMsAvg:
+        this.metrics.reconciliationLatencyMsCount > 0
+          ? this.metrics.reconciliationLatencyMsSum / this.metrics.reconciliationLatencyMsCount
+          : 0,
+    };
   }
 
   private log(event: string, data: Record<string, unknown>) {

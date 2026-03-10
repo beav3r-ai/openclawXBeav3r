@@ -142,6 +142,49 @@ describe('bridge behavior', () => {
     recvServer.close();
   });
 
+  it('exposes reconciliation observability metrics', async () => {
+    const beav3r: Beav3rClient = {
+      createDecisionRequest: async () => ({ requestId: 'r-metrics' }),
+      fetchDecision: async () => null,
+    };
+    const receiver = express();
+    receiver.use(express.json());
+    receiver.post('/callback/openclaw-resolve', (_req, res) => res.json({ ok: true }));
+    const recvServer = receiver.listen(6572);
+
+    const bridge = new OpenClawBeav3rBridge(
+      { ...cfg, timeouts: { ...cfg.timeouts, pendingTimeoutSec: 1 } },
+      beav3r
+    );
+    const s = bridge.app().listen(6573);
+
+    await fetch('http://127.0.0.1:6573/handoff', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...payload,
+        approvalId: 'ap-metrics',
+        idempotencyKey: 'ap-metrics:1',
+        callback: { ...payload.callback, url: 'http://127.0.0.1:6572/callback/openclaw-resolve' },
+      }),
+    });
+
+    await new Promise((r) => setTimeout(r, 1100));
+    await bridge.tick();
+
+    const metricsRes = await fetch('http://127.0.0.1:6573/metrics');
+    const metrics = (await metricsRes.json()) as any;
+    expect(metrics.handoffAcceptedTotal).toBe(1);
+    expect(metrics.handoffAcceptedBeav3rTotal).toBe(1);
+    expect(metrics.reconciledPendingTimeoutTotal).toBe(1);
+    expect(metrics.deliveredTerminalTotal).toBe(1);
+    expect(metrics.deliveredByStatus.timeout).toBe(1);
+    expect(metrics.reconciliationLatencyMsAvg).toBeGreaterThan(0);
+
+    s.close();
+    recvServer.close();
+  });
+
   it('duplicate callback ignored', async () => {
     const beav3r: Beav3rClient = {
       createDecisionRequest: async () => ({ requestId: 'rdup' }),

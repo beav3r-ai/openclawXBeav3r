@@ -114,38 +114,35 @@ export class OpenClawBeav3rBridge {
 
   async tick() {
     const nowSec = Math.floor(Date.now() / 1000);
-    for (const approvalId of Array.from(this.requestToApproval.values())) {
-      const rec = this.store.get(approvalId);
-      if (!rec || rec.state !== 'pending') continue;
+    for (const rec of this.store.listPending()) {
+      const approvalId = rec.approvalId;
+      const requestId = this.approvalToRequest.get(approvalId) ?? approvalId;
 
-      const requestId = this.approvalToRequest.get(approvalId);
-      if (requestId) {
-        try {
-          const decision = await this.beav3r.fetchDecision(requestId);
-          if (decision) {
-            await this.deliverTerminal(rec.payload.callback.url, {
-              approvalId,
-              status: decision.status,
-              decision: decision.status === 'approved' ? 'allow-once' : 'deny',
-              decidedAt: nowSec,
-              approver:
-                decision.approver ?? {
-                  deviceId: 'beav3r',
-                  publicKey: 'base64',
-                  assurance: 'software',
-                },
-              signature: {
-                scheme: 'ed25519',
-                value: decision.signature ?? `beav3r-${decision.status}`,
+      try {
+        const decision = await this.beav3r.fetchDecision(requestId);
+        if (decision) {
+          await this.deliverTerminal(rec.payload.callback.url, {
+            approvalId,
+            status: decision.status,
+            decision: decision.status === 'approved' ? 'allow-once' : 'deny',
+            decidedAt: nowSec,
+            approver:
+              decision.approver ?? {
+                deviceId: 'beav3r',
+                publicKey: 'base64',
+                assurance: 'software',
               },
-              reason: decision.reason,
-              expiresAt: rec.payload.expiry,
-            });
-            continue;
-          }
-        } catch {
-          this.log('beav3r.fetch_failed', { approvalId, requestId });
+            signature: {
+              scheme: 'ed25519',
+              value: decision.signature ?? `beav3r-${decision.status}`,
+            },
+            reason: decision.reason,
+            expiresAt: rec.payload.expiry,
+          });
+          continue;
         }
+      } catch {
+        this.log('beav3r.fetch_failed', { approvalId, requestId });
       }
 
       if (nowSec > rec.payload.expiry + this.cfg.timeouts.expireSkewSec) {
@@ -157,6 +154,22 @@ export class OpenClawBeav3rBridge {
           approver: { deviceId: 'bridge-timeout', publicKey: 'local', assurance: 'software' },
           signature: { scheme: 'ed25519', value: 'expired' },
           reason: 'Approval expired before decision',
+          expiresAt: rec.payload.expiry,
+        });
+        continue;
+      }
+
+      const pendingForSec = Math.max(0, nowSec - Math.floor(rec.updatedAt / 1000));
+      if (pendingForSec >= this.cfg.timeouts.pendingTimeoutSec) {
+        this.log('approval.stuck_reconciled', { approvalId, pendingForSec, requestId });
+        await this.deliverTerminal(rec.payload.callback.url, {
+          approvalId,
+          status: 'timeout',
+          decision: 'deny',
+          decidedAt: nowSec,
+          approver: { deviceId: 'bridge-reconciler', publicKey: 'local', assurance: 'software' },
+          signature: { scheme: 'ed25519', value: 'pending-timeout' },
+          reason: `Approval pending longer than ${this.cfg.timeouts.pendingTimeoutSec}s`,
           expiresAt: rec.payload.expiry,
         });
       }

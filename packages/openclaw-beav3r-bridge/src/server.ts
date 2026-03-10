@@ -33,6 +33,7 @@ const bridge = new OpenClawBeav3rBridge(
     timeouts: {
       pollMs,
       expireSkewSec: intEnv('EXPIRE_SKEW_SEC', 0),
+      pendingTimeoutSec: intEnv('PENDING_TIMEOUT_SEC', 300),
     },
   },
   new HttpBeav3rClient(process.env.BEAV3R_URL ?? 'http://127.0.0.1:3000', timeoutMs)

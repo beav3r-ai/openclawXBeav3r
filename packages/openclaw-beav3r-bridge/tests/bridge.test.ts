@@ -28,7 +28,7 @@ const cfg = {
   fallbackPolicy: { medium: 'local' as const, high: 'deny' as const },
   beav3r: { baseUrl: 'http://localhost:3000', timeoutMs: 500 },
   callback: { secret: 'secret', retries: 0, backoffMs: 1 },
-  timeouts: { pollMs: 20, expireSkewSec: 0 },
+  timeouts: { pollMs: 20, expireSkewSec: 0, pendingTimeoutSec: 300 },
 };
 
 describe('route local vs beav3r', () => {
@@ -97,6 +97,46 @@ describe('bridge behavior', () => {
     });
     await bridge.tick();
     expect(results[0].status).toBe('expired');
+
+    s.close();
+    recvServer.close();
+  });
+
+  it('reconciles stuck pending approvals to timeout before expiry', async () => {
+    const beav3r: Beav3rClient = {
+      createDecisionRequest: async () => ({ requestId: 'r-stuck' }),
+      fetchDecision: async () => null,
+    };
+    const results: any[] = [];
+    const receiver = express();
+    receiver.use(express.json());
+    receiver.post('/callback/openclaw-resolve', (req, res) => {
+      results.push(req.body);
+      res.json({ ok: true });
+    });
+    const recvServer = receiver.listen(6570);
+
+    const bridge = new OpenClawBeav3rBridge(
+      { ...cfg, timeouts: { ...cfg.timeouts, pendingTimeoutSec: 1 } },
+      beav3r
+    );
+    const s = bridge.app().listen(6571);
+
+    await fetch('http://127.0.0.1:6571/handoff', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...payload,
+        approvalId: 'ap-stuck',
+        idempotencyKey: 'ap-stuck:1',
+        expiry: Math.floor(Date.now() / 1000) + 3600,
+        callback: { ...payload.callback, url: 'http://127.0.0.1:6570/callback/openclaw-resolve' },
+      }),
+    });
+
+    await new Promise((r) => setTimeout(r, 1100));
+    await bridge.tick();
+    expect(results[0].status).toBe('timeout');
 
     s.close();
     recvServer.close();

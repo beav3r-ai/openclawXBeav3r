@@ -15,6 +15,7 @@ export interface ApprovalStore {
   putIdempotency(key: string, rec: ApprovalRecord): void;
   get(approvalId: string): ApprovalRecord | undefined;
   set(rec: ApprovalRecord): void;
+  listPending(): ApprovalRecord[];
   markTerminal(approvalId: string, decision: CallbackDecision): ApprovalRecord | undefined;
 }
 
@@ -38,6 +39,10 @@ export class InMemoryApprovalStore implements ApprovalStore {
 
   set(rec: ApprovalRecord): void {
     this.byId.set(rec.approvalId, rec);
+  }
+
+  listPending(): ApprovalRecord[] {
+    return Array.from(this.byId.values()).filter((r) => r.state === 'pending');
   }
 
   markTerminal(approvalId: string, decision: CallbackDecision): ApprovalRecord | undefined {

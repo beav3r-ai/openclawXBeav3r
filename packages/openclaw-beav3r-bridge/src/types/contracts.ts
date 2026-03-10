@@ -35,5 +35,5 @@ export interface BridgeConfig {
   fallbackPolicy: Partial<Record<RiskLevel, 'local' | 'deny'>>;
   beav3r: { baseUrl: string; timeoutMs: number; enabled?: boolean };
   callback: { secret: string; retries: number; backoffMs: number };
-  timeouts: { pollMs: number; expireSkewSec: number };
+  timeouts: { pollMs: number; expireSkewSec: number; pendingTimeoutSec: number };
 }

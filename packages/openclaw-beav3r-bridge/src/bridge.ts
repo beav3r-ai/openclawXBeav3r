@@ -4,6 +4,7 @@ import { chooseRoute, unavailableFallback } from './policy/router';
 import { ApprovalRecord, ApprovalStore, InMemoryApprovalStore } from './state/store';
 import { BridgeConfig, CallbackDecision, HandoffPayloadV1 } from './types/contracts';
 import { hmac } from './utils/signature';
+import { BridgeHandoffResponse } from '../../openclaw-approvals/src/types/contracts';
 
 type BridgeMetrics = {
   handoffAcceptedTotal: number;
@@ -61,7 +62,7 @@ export class OpenClawBeav3rBridge {
 
       const existing = this.store.getByIdempotency(p.idempotencyKey);
       if (existing) {
-        return res.json({ approvalId: existing.approvalId, status: 'accepted', route: existing.route, queued: existing.route === 'beav3r' });
+        return res.json(this.toHandoffResponse(existing));
       }
 
       let route = chooseRoute(p, this.cfg);
@@ -78,9 +79,17 @@ export class OpenClawBeav3rBridge {
           const recoverableRequestId = p.approvalId;
           this.requestToApproval.set(recoverableRequestId, p.approvalId);
           this.approvalToRequest.set(p.approvalId, recoverableRequestId);
+          this.log('handoff.beav3r_request_failed', {
+            approvalId: p.approvalId,
+            requestId: recoverableRequestId,
+            error: error instanceof Error ? error.message : 'unknown error',
+          });
 
           try {
-            await this.beav3r.fetchDecision(recoverableRequestId);
+            const recoveredDecision = await this.beav3r.fetchDecision(recoverableRequestId);
+            if (recoveredDecision === null) {
+              throw new Error('recovery lookup found no action');
+            }
             rec.state = 'pending';
             this.log('handoff.request_uncertain', {
               approvalId: p.approvalId,
@@ -90,7 +99,7 @@ export class OpenClawBeav3rBridge {
           } catch {
             const fb = unavailableFallback(p, this.cfg);
             if (fb === 'deny') {
-              await this.sendCallback(p.callback.url, {
+              const callback: CallbackDecision = {
                 approvalId: p.approvalId,
                 status: 'denied',
                 decision: 'deny',
@@ -99,12 +108,25 @@ export class OpenClawBeav3rBridge {
                 signature: { scheme: 'ed25519', value: 'fallback-deny' },
                 reason: 'Beav3r unavailable fallback deny',
                 expiresAt: p.expiry,
-              });
+              };
+              await this.sendCallback(p.callback.url, callback);
               rec.state = 'denied';
+              rec.terminal = callback;
+              rec.updatedAt = Date.now();
+              this.log('handoff.fallback_denied', {
+                approvalId: p.approvalId,
+                route,
+                reason: callback.reason,
+              });
             } else {
               route = 'local';
               queued = false;
               rec.route = 'local';
+              rec.updatedAt = Date.now();
+              this.log('handoff.fallback_local', {
+                approvalId: p.approvalId,
+                reason: 'Beav3r unavailable fallback local',
+              });
             }
           }
         }
@@ -114,8 +136,15 @@ export class OpenClawBeav3rBridge {
       this.metrics.handoffAcceptedTotal += 1;
       if (route === 'beav3r') this.metrics.handoffAcceptedBeav3rTotal += 1;
       if (route === 'local') this.metrics.handoffAcceptedLocalTotal += 1;
-      this.log('handoff.accepted', { approvalId: p.approvalId, route, queued });
-      return res.json({ approvalId: p.approvalId, status: 'accepted', route, queued });
+      const response = this.toHandoffResponse(rec);
+      this.log('handoff.accepted', {
+        approvalId: p.approvalId,
+        route: response.route,
+        queued: response.queued,
+        status: response.status,
+        reason: response.reason,
+      });
+      return res.json(response);
     });
 
     app.post('/beav3r/webhook', async (req, res) => {
@@ -247,6 +276,27 @@ export class OpenClawBeav3rBridge {
         this.metrics.reconciliationLatencyMsCount > 0
           ? this.metrics.reconciliationLatencyMsSum / this.metrics.reconciliationLatencyMsCount
           : 0,
+    };
+  }
+
+  private toHandoffResponse(rec: ApprovalRecord): BridgeHandoffResponse {
+    const queued = rec.route === 'beav3r' && rec.state === 'pending';
+    if (rec.state === 'denied') {
+      return {
+        approvalId: rec.approvalId,
+        status: 'denied',
+        route: rec.route,
+        queued,
+        reason: rec.terminal?.reason ?? 'Approval denied',
+      };
+    }
+
+    return {
+      approvalId: rec.approvalId,
+      status: 'accepted',
+      route: rec.route,
+      queued,
+      reason: rec.route === 'local' && !queued ? 'Beav3r unavailable fallback local' : undefined,
     };
   }
 

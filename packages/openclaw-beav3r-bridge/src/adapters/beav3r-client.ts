@@ -56,7 +56,7 @@ export class HttpBeav3rClient implements Beav3rClient {
         risk: payload.risk,
       },
       timestamp: Math.floor(Date.now() / 1000),
-      nonce: payload.nonce,
+      nonce: payload.nonce || payload.approvalId,
       expiry: payload.expiry,
     };
 
@@ -66,7 +66,9 @@ export class HttpBeav3rClient implements Beav3rClient {
       body: JSON.stringify(request),
     });
 
-    if (!res.ok) throw new Error(`beaver action request failed: ${res.status}`);
+    if (!res.ok) {
+      throw new Error(`beaver action request failed: ${res.status}${await this.describeError(res)}`);
+    }
     const body = (await res.json()) as BeaverActionRequestResult;
     return { requestId: body.actionId };
   }
@@ -74,7 +76,7 @@ export class HttpBeav3rClient implements Beav3rClient {
   async fetchDecision(requestId: string) {
     const res = await this.request(`/actions/${encodeURIComponent(requestId)}/status`);
     if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`beaver action status failed: ${res.status}`);
+    if (!res.ok) throw new Error(`beaver action status failed: ${res.status}${await this.describeError(res)}`);
 
     const body = (await res.json()) as BeaverActionStatusResult;
     if (body.status === 'pending') return null;
@@ -93,7 +95,7 @@ export class HttpBeav3rClient implements Beav3rClient {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(input),
     });
-    if (!res.ok) throw new Error(`beaver submit approval failed: ${res.status}`);
+    if (!res.ok) throw new Error(`beaver submit approval failed: ${res.status}${await this.describeError(res)}`);
     return (await res.json()) as { status: 'executed'; actionId: string };
   }
 
@@ -103,7 +105,7 @@ export class HttpBeav3rClient implements Beav3rClient {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(input),
     });
-    if (!res.ok) throw new Error(`beaver reject approval failed: ${res.status}`);
+    if (!res.ok) throw new Error(`beaver reject approval failed: ${res.status}${await this.describeError(res)}`);
     return (await res.json()) as { status: 'rejected'; actionId: string };
   }
 
@@ -114,6 +116,20 @@ export class HttpBeav3rClient implements Beav3rClient {
       return await fetch(`${this.baseUrl}${path}`, { ...init, signal: c.signal });
     } finally {
       clearTimeout(t);
+    }
+  }
+
+  private async describeError(res: Response): Promise<string> {
+    const text = await res.text();
+    if (!text) {
+      return '';
+    }
+
+    try {
+      const body = JSON.parse(text) as { error?: string };
+      return body.error ? ` ${body.error}` : ` ${text}`;
+    } catch {
+      return ` ${text}`;
     }
   }
 }

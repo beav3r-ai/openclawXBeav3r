@@ -24,8 +24,10 @@ export class OpenClawApprovalsPlugin {
       const handoff = await this.handoff(evt, callbackUrl);
       this.log('approval.route_chosen', {
         approvalId: evt.approvalId,
+        status: handoff.status,
         route: handoff.route,
         queued: handoff.queued,
+        reason: handoff.reason,
       });
     });
   }
@@ -67,12 +69,22 @@ export class OpenClawApprovalsPlugin {
 
       const mapped = mapCallbackToResolve(body);
       this.log('approval.resolve_called', { approvalId: body.approvalId, decision: mapped });
-      await this.resolver.resolveApproval({
-        approvalId: body.approvalId,
-        decision: mapped,
-        reason: body.reason,
-        metadata: body as unknown as Record<string, unknown>,
-      });
+      try {
+        await this.resolver.resolveApproval({
+          approvalId: body.approvalId,
+          decision: mapped,
+          reason: body.reason,
+          metadata: body as unknown as Record<string, unknown>,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.log('approval.resolve_failed', {
+          approvalId: body.approvalId,
+          decision: mapped,
+          message,
+        });
+        return res.status(502).json({ error: message });
+      }
       this.log('approval.resolve_result', { approvalId: body.approvalId, status: 'resolved' });
       return res.status(200).json({ status: 'resolved' });
     });

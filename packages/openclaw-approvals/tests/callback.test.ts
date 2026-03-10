@@ -85,4 +85,38 @@ describe('callback HMAC and duplicate protection', () => {
     expect(res.status).toBe(400);
     server.close();
   });
+
+  it('returns 502 when gateway resolve fails instead of crashing the plugin', async () => {
+    const plugin = new OpenClawApprovalsPlugin(cfg, {
+      async resolveApproval() {
+        throw new Error('unknown approval id');
+      },
+    });
+    const app = express();
+    app.use(plugin.callbackRouter());
+    const server = app.listen(18067);
+
+    const payload = {
+      approvalId: 'a2',
+      status: 'approved',
+      decision: 'allow-once',
+      decidedAt: 1773072801,
+      approver: { deviceId: 'd', publicKey: 'k', assurance: 'software' },
+      signature: { scheme: 'ed25519', value: 'sig2' },
+      reason: 'ok',
+      expiresAt: 1773076401,
+    };
+    const raw = JSON.stringify(payload);
+    const sig = computeHmacSha256(raw, 'secret');
+
+    const response = await fetch('http://127.0.0.1:18067/callback/openclaw-resolve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-ocb-signature': sig },
+      body: raw,
+    });
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: 'unknown approval id' });
+    server.close();
+  });
 });

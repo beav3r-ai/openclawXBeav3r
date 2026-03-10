@@ -39,6 +39,29 @@ describe('HttpBeav3rClient (beaver endpoint contract)', () => {
     expect(mockFetch.mock.calls[0][0]).toBe('http://localhost:3000/actions/request');
   });
 
+  it('falls back to approvalId when nonce is missing', async () => {
+    const mockFetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.nonce).toBe('oc_appr_123');
+      return new Response(JSON.stringify({ status: 'pending', actionId: 'oc_appr_123', actionHash: 'h', reason: 'approval required' }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const client = new HttpBeav3rClient('http://localhost:3000', 1000);
+    const out = await client.createDecisionRequest({ ...payload, nonce: undefined as unknown as string });
+    expect(out).toEqual({ requestId: 'oc_appr_123' });
+  });
+
+  it('includes beav3r error body when action request fails', async () => {
+    const mockFetch = vi.fn(async () => new Response(JSON.stringify({ error: 'Action oc_appr_123 already exists' }), { status: 400 }));
+    vi.stubGlobal('fetch', mockFetch);
+
+    const client = new HttpBeav3rClient('http://localhost:3000', 1000);
+    await expect(client.createDecisionRequest(payload)).rejects.toThrow(
+      'beaver action request failed: 400 Action oc_appr_123 already exists'
+    );
+  });
+
   it('maps /actions/:id/status to approved/denied/expired decision states', async () => {
     const mockFetch = vi
       .fn()

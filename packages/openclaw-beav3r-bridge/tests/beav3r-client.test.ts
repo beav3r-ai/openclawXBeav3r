@@ -32,6 +32,23 @@ describe('HttpBeav3rClient (beaver endpoint contract)', () => {
       expect(body.action.actionType).toBe('openclaw.exec_approval_requested');
       expect(body.action.payload.command).toBe('echo hi');
       expect(headers?.authorization).toBe('Bearer test-key');
+      expect(body.source).toMatchObject({
+        type: 'openclaw',
+        originLabel: 'OpenClaw h',
+        metadata: {
+          integration: 'openclaw',
+          agentId: 'main',
+          sessionId: 's',
+          senderId: 'u',
+          channel: 'telegram',
+          hostname: 'h',
+          envClass: 'prod',
+          workspace: '/w',
+          host: 'gateway',
+          node: null,
+          tool: 'exec',
+        },
+      });
       expect(body.action.attributes).toMatchObject({
         tool: 'exec',
         risk_score: 86,
@@ -59,6 +76,20 @@ describe('HttpBeav3rClient (beaver endpoint contract)', () => {
     const client = new HttpBeav3rClient('http://localhost:3000', 1000);
     const out = await client.createDecisionRequest({ ...payload, nonce: undefined as unknown as string });
     expect(out).toEqual({ requestId: 'oc_appr_123' });
+  });
+
+  it('allows overriding the origin label with env', async () => {
+    process.env.BEAV3R_ORIGIN_LABEL = 'Ndeto MacBook';
+    const mockFetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.source.originLabel).toBe('Ndeto MacBook');
+      return new Response(JSON.stringify({ status: 'pending', actionId: 'oc_appr_123', actionHash: 'h', reason: 'approval required' }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const client = new HttpBeav3rClient('http://localhost:3000', 1000);
+    await expect(client.createDecisionRequest(payload)).resolves.toEqual({ requestId: 'oc_appr_123' });
+    delete process.env.BEAV3R_ORIGIN_LABEL;
   });
 
   it('includes beav3r error body when action request fails', async () => {

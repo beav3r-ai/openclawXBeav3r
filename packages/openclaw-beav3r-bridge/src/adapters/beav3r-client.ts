@@ -81,6 +81,11 @@ export class HttpBeav3rClient implements Beav3rClient {
       body: JSON.stringify({
         action: request,
         reason: payload.reason,
+        source: {
+          type: process.env.BEAV3R_ORIGIN_TYPE?.trim() || 'openclaw',
+          originLabel: resolveOriginLabel(payload),
+          metadata: buildOriginMetadata(payload),
+        },
       }),
     });
 
@@ -157,4 +162,39 @@ export class HttpBeav3rClient implements Beav3rClient {
       return ` ${text}`;
     }
   }
+}
+
+function resolveOriginLabel(payload: HandoffPayloadV1): string {
+  const configured = process.env.BEAV3R_ORIGIN_LABEL?.trim();
+  if (configured) {
+    return configured;
+  }
+
+  const hostname = payload.environment.hostname?.trim();
+  if (hostname) {
+    return `OpenClaw ${hostname}`;
+  }
+
+  const containerHostname = process.env.HOSTNAME?.trim();
+  if (containerHostname) {
+    return `OpenClaw ${containerHostname}`;
+  }
+
+  return `OpenClaw ${payload.actor.agentId}`;
+}
+
+function buildOriginMetadata(payload: HandoffPayloadV1): Record<string, unknown> {
+  return {
+    integration: 'openclaw',
+    tool: payload.action.tool,
+    agentId: payload.actor.agentId,
+    sessionId: payload.actor.sessionId,
+    senderId: payload.actor.senderId,
+    channel: payload.actor.channel,
+    hostname: payload.environment.hostname,
+    envClass: payload.environment.envClass,
+    workspace: payload.environment.workspace,
+    host: payload.action.host ?? null,
+    node: payload.action.node,
+  };
 }

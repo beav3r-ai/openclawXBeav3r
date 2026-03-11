@@ -1,31 +1,37 @@
-version: '3.9'
 services:
-  beav3r:
-    image: node:22-alpine
-    working_dir: /app
-    volumes:
-      - ../:/app
-      - /Users/ndeto/.openclaw/workspace/beaver:/beaver
-    command: sh -c "echo 'TODO: replace with local beaver start command from /beaver repo' && tail -f /dev/null"
-    ports:
-      - '3000:3000'
-
   bridge:
-    image: node:22-alpine
-    working_dir: /app
-    volumes:
-      - ../:/app
-    command: sh -c "npm ci && npm run -w @beav3r/openclaw-beav3r-bridge build"
+    build:
+      context: ..
+      dockerfile: packages/openclaw-beav3r-bridge/Dockerfile
     environment:
-      - BRIDGE_CALLBACK_SECRET=secret
+      BEAV3R_URL: ${BEAV3R_URL}
+      BEAV3R_API_KEY: ${BEAV3R_API_KEY}
+      BRIDGE_HOST: 0.0.0.0
+      BRIDGE_PORT: 7772
+      CALLBACK_SECRET: ${CALLBACK_SECRET}
+      BRIDGE_POLL_MS: 1500
     ports:
-      - '4400:4400'
+      - "7772:7772"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   plugin:
-    image: node:22-alpine
-    working_dir: /app
-    volumes:
-      - ../:/app
-    command: sh -c "npm ci && npm run -w @openclaw/openclaw-approvals build"
+    build:
+      context: ..
+      dockerfile: packages/openclaw-approvals/Dockerfile
+    depends_on:
+      bridge:
+        condition: service_started
+    environment:
+      BEAV3R_URL: ${BEAV3R_URL}
+      BEAV3R_API_KEY: ${BEAV3R_API_KEY}
+      OPENCLAW_GATEWAY_URL: ${OPENCLAW_GATEWAY_URL:-ws://host.docker.internal:18789}
+      BRIDGE_URL: http://bridge:7772
+      CALLBACK_SECRET: ${CALLBACK_SECRET}
+      PLUGIN_HOST: 0.0.0.0
+      PLUGIN_PORT: 7771
+      PLUGIN_PUBLIC_URL: ${PLUGIN_PUBLIC_URL:-http://127.0.0.1:7771}
     ports:
-      - '4500:4500'
+      - "7771:7771"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

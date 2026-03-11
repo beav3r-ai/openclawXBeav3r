@@ -7,6 +7,7 @@ function intEnv(name: string, fallback: number): number {
 }
 
 const port = intEnv('BRIDGE_PORT', 7772);
+const host = process.env.BRIDGE_HOST ?? '127.0.0.1';
 const pollMs = intEnv('BRIDGE_POLL_MS', 1500);
 const timeoutMs = intEnv('BEAV3R_TIMEOUT_MS', 3000);
 
@@ -36,7 +37,11 @@ const bridge = new OpenClawBeav3rBridge(
       pendingTimeoutSec: intEnv('PENDING_TIMEOUT_SEC', 300),
     },
   },
-  new HttpBeav3rClient(process.env.BEAV3R_URL ?? 'http://127.0.0.1:3000', timeoutMs)
+  new HttpBeav3rClient(
+    process.env.BEAV3R_URL ?? 'http://127.0.0.1:3000',
+    timeoutMs,
+    process.env.BEAV3R_API_KEY
+  )
 );
 
 const app = bridge.app();
@@ -44,12 +49,13 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', component: 'openclaw-beav3r-bridge' });
 });
 
-const server = app.listen(port, '127.0.0.1', () => {
+const server = app.listen(port, host, () => {
   console.log(
     JSON.stringify({
       ts: new Date().toISOString(),
       component: 'openclaw-beav3r-bridge',
       event: 'server.started',
+      host,
       port,
       beav3rUrl: process.env.BEAV3R_URL ?? 'http://127.0.0.1:3000',
       pollMs,

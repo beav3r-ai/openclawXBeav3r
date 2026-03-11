@@ -22,27 +22,36 @@ describe('HttpBeav3rClient (beaver endpoint contract)', () => {
     vi.restoreAllMocks();
   });
 
-  it('maps handoff payload to /actions/request and returns actionId as requestId', async () => {
+  it('maps handoff payload to /actions/relay and returns actionId as requestId', async () => {
     const mockFetch = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
-      expect(body.actionId).toBe('oc_appr_123');
-      expect(body.agentId).toBe('main');
-      expect(body.actionType).toBe('exec');
-      expect(body.payload.command).toBe('echo hi');
+      const headers = init?.headers as Record<string, string> | undefined;
+      expect(body.reason).toBe('r');
+      expect(body.action.actionId).toBe('oc_appr_123');
+      expect(body.action.agentId).toBe('main');
+      expect(body.action.actionType).toBe('openclaw.exec_approval_requested');
+      expect(body.action.payload.command).toBe('echo hi');
+      expect(headers?.authorization).toBe('Bearer test-key');
+      expect(body.action.attributes).toMatchObject({
+        tool: 'exec',
+        risk_score: 86,
+        risk_level: 'high',
+        environment: 'prod',
+      });
       return new Response(JSON.stringify({ status: 'pending', actionId: 'oc_appr_123', actionHash: 'h', reason: 'approval required' }), { status: 200 });
     });
     vi.stubGlobal('fetch', mockFetch);
 
-    const client = new HttpBeav3rClient('http://localhost:3000', 1000);
+    const client = new HttpBeav3rClient('http://localhost:3000', 1000, 'test-key');
     const out = await client.createDecisionRequest(payload);
     expect(out).toEqual({ requestId: 'oc_appr_123' });
-    expect(mockFetch.mock.calls[0][0]).toBe('http://localhost:3000/actions/request');
+    expect(mockFetch.mock.calls[0][0]).toBe('http://localhost:3000/actions/relay');
   });
 
   it('falls back to approvalId when nonce is missing', async () => {
     const mockFetch = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
-      expect(body.nonce).toBe('oc_appr_123');
+      expect(body.action.nonce).toBe('oc_appr_123');
       return new Response(JSON.stringify({ status: 'pending', actionId: 'oc_appr_123', actionHash: 'h', reason: 'approval required' }), { status: 200 });
     });
     vi.stubGlobal('fetch', mockFetch);
@@ -58,7 +67,7 @@ describe('HttpBeav3rClient (beaver endpoint contract)', () => {
 
     const client = new HttpBeav3rClient('http://localhost:3000', 1000);
     await expect(client.createDecisionRequest(payload)).rejects.toThrow(
-      'beaver action request failed: 400 Action oc_appr_123 already exists'
+      'beaver relay request failed: 400 Action oc_appr_123 already exists'
     );
   });
 

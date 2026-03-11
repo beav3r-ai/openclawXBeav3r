@@ -59,7 +59,7 @@ type PairedDeviceRecord = {
   scopes?: string[];
 };
 
-const DEFAULT_STATE_DIR = '/Users/ndeto/.openclaw';
+const DEFAULT_STATE_DIR = process.env.OPENCLAW_STATE_DIR?.trim() || '/openclaw-state';
 
 function randomId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;

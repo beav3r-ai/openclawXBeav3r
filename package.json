@@ -11,7 +11,11 @@
     "demo": "tsx examples/demo-simulate.ts",
     "bridge": "npm run --workspace @beav3r/openclaw-beav3r-bridge start",
     "plugin": "npm run --workspace @openclaw/openclaw-approvals start",
-    "plugin:openclaw": "npm run --workspace @openclaw/openclaw-approvals start:openclaw"
+    "plugin:openclaw": "npm run --workspace @openclaw/openclaw-approvals start:openclaw",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "install:docker": "sh scripts/install-docker.sh"
   },
   "devDependencies": {
     "tsx": "^4.19.3",

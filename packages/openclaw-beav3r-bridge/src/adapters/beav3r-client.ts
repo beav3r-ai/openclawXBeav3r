@@ -5,6 +5,7 @@ export type BeaverActionRequest = {
   agentId: string;
   actionType: string;
   payload: Record<string, unknown>;
+  attributes: Record<string, string | number | boolean | null>;
   timestamp: number;
   nonce: string;
   expiry: number;
@@ -39,35 +40,52 @@ export interface Beav3rClient {
 }
 
 export class HttpBeav3rClient implements Beav3rClient {
-  constructor(private readonly baseUrl: string, private readonly timeoutMs: number) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly timeoutMs: number,
+    private readonly apiKey?: string
+  ) {}
 
   async createDecisionRequest(payload: HandoffPayloadV1): Promise<{ requestId: string }> {
     const request: BeaverActionRequest = {
       actionId: payload.approvalId,
       agentId: payload.actor.agentId,
-      actionType: payload.action.tool,
+      actionType: `openclaw.${payload.action.tool}_approval_requested`,
       payload: {
         command: payload.action.command,
         cwd: payload.action.cwd,
         host: payload.action.host,
         node: payload.action.node,
         systemRunPlan: payload.action.systemRunPlan,
-        reason: payload.reason,
         risk: payload.risk,
+        callbackUrl: payload.callback.url,
+      },
+      attributes: {
+        tool: payload.action.tool,
+        command: payload.action.command,
+        host: payload.action.host ?? null,
+        node: payload.action.node,
+        risk_score: payload.risk.score,
+        risk_level: payload.risk.level,
+        environment: payload.environment.envClass,
+        channel: payload.actor.channel,
       },
       timestamp: Math.floor(Date.now() / 1000),
       nonce: payload.nonce || payload.approvalId,
       expiry: payload.expiry,
     };
 
-    const res = await this.request('/actions/request', {
+    const res = await this.request('/actions/relay', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(request),
+      body: JSON.stringify({
+        action: request,
+        reason: payload.reason,
+      }),
     });
 
     if (!res.ok) {
-      throw new Error(`beaver action request failed: ${res.status}${await this.describeError(res)}`);
+      throw new Error(`beaver relay request failed: ${res.status}${await this.describeError(res)}`);
     }
     const body = (await res.json()) as BeaverActionRequestResult;
     return { requestId: body.actionId };
@@ -113,7 +131,14 @@ export class HttpBeav3rClient implements Beav3rClient {
     const c = new AbortController();
     const t = setTimeout(() => c.abort(), this.timeoutMs);
     try {
-      return await fetch(`${this.baseUrl}${path}`, { ...init, signal: c.signal });
+      return await fetch(`${this.baseUrl}${path}`, {
+        ...init,
+        headers: {
+          ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
+          ...(init?.headers ?? {}),
+        },
+        signal: c.signal
+      });
     } finally {
       clearTimeout(t);
     }

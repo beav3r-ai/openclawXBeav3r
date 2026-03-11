@@ -3,6 +3,7 @@ import { Beav3rClient } from './adapters/beav3r-client';
 import { chooseRoute, unavailableFallback } from './policy/router';
 import { ApprovalRecord, ApprovalStore, InMemoryApprovalStore } from './state/store';
 import { BridgeConfig, CallbackDecision, HandoffPayloadV1 } from './types/contracts';
+import { logger } from './utils/logger';
 import { hmac } from './utils/signature';
 import { BridgeHandoffResponse } from '../../openclaw-approvals/src/types/contracts';
 
@@ -79,7 +80,7 @@ export class OpenClawBeav3rBridge {
           const recoverableRequestId = p.approvalId;
           this.requestToApproval.set(recoverableRequestId, p.approvalId);
           this.approvalToRequest.set(p.approvalId, recoverableRequestId);
-          this.log('handoff.beav3r_request_failed', {
+          logger.warn('handoff.beav3r_request_failed', {
             approvalId: p.approvalId,
             requestId: recoverableRequestId,
             error: error instanceof Error ? error.message : 'unknown error',
@@ -91,7 +92,7 @@ export class OpenClawBeav3rBridge {
               throw new Error('recovery lookup found no action');
             }
             rec.state = 'pending';
-            this.log('handoff.request_uncertain', {
+            logger.warn('handoff.request_uncertain', {
               approvalId: p.approvalId,
               requestId: recoverableRequestId,
               error: error instanceof Error ? error.message : 'unknown error',
@@ -113,7 +114,7 @@ export class OpenClawBeav3rBridge {
               rec.state = 'denied';
               rec.terminal = callback;
               rec.updatedAt = Date.now();
-              this.log('handoff.fallback_denied', {
+              logger.warn('handoff.fallback_denied', {
                 approvalId: p.approvalId,
                 route,
                 reason: callback.reason,
@@ -123,7 +124,7 @@ export class OpenClawBeav3rBridge {
               queued = false;
               rec.route = 'local';
               rec.updatedAt = Date.now();
-              this.log('handoff.fallback_local', {
+              logger.warn('handoff.fallback_local', {
                 approvalId: p.approvalId,
                 reason: 'Beav3r unavailable fallback local',
               });
@@ -137,7 +138,7 @@ export class OpenClawBeav3rBridge {
       if (route === 'beav3r') this.metrics.handoffAcceptedBeav3rTotal += 1;
       if (route === 'local') this.metrics.handoffAcceptedLocalTotal += 1;
       const response = this.toHandoffResponse(rec);
-      this.log('handoff.accepted', {
+      logger.info('handoff.accepted', {
         approvalId: p.approvalId,
         route: response.route,
         queued: response.queued,
@@ -148,12 +149,35 @@ export class OpenClawBeav3rBridge {
     });
 
     app.post('/beav3r/webhook', async (req, res) => {
+      logger.debug('beav3r.webhook.received', {
+        body: req.body as Record<string, unknown>,
+      });
       const body = req.body as { requestId: string; status: 'approved' | 'denied'; reason?: string; signature?: string; approver?: CallbackDecision['approver'] };
       const approvalId = this.requestToApproval.get(body.requestId);
-      if (!approvalId) return res.status(404).json({ error: 'unknown request' });
+      if (!approvalId) {
+        logger.warn('beav3r.webhook.unknown_request', {
+          requestId: body.requestId,
+          status: body.status,
+          reason: body.reason,
+        });
+        return res.status(404).json({ error: 'unknown request' });
+      }
       const rec = this.store.get(approvalId);
-      if (!rec) return res.status(404).json({ error: 'missing approval' });
-      if (['approved', 'denied', 'expired', 'timeout'].includes(rec.state)) return res.status(202).json({ status: 'duplicate_ignored' });
+      if (!rec) {
+        logger.warn('beav3r.webhook.missing_approval', {
+          approvalId,
+          requestId: body.requestId,
+        });
+        return res.status(404).json({ error: 'missing approval' });
+      }
+      if (['approved', 'denied', 'expired', 'timeout'].includes(rec.state)) {
+        logger.debug('beav3r.webhook.duplicate_ignored', {
+          approvalId,
+          requestId: body.requestId,
+          state: rec.state,
+        });
+        return res.status(202).json({ status: 'duplicate_ignored' });
+      }
 
       const callback: CallbackDecision = {
         approvalId,
@@ -166,6 +190,12 @@ export class OpenClawBeav3rBridge {
         expiresAt: rec.payload.expiry,
       };
 
+      logger.info('beav3r.webhook.forwarding_terminal_callback', {
+        approvalId,
+        requestId: body.requestId,
+        status: body.status,
+        callbackUrl: rec.payload.callback.url,
+      });
       await this.deliverTerminal(rec.payload.callback.url, callback);
       return res.json({ status: 'ok' });
     });
@@ -204,7 +234,7 @@ export class OpenClawBeav3rBridge {
         }
       } catch {
         this.metrics.fetchDecisionErrorsTotal += 1;
-        this.log('beav3r.fetch_failed', { approvalId, requestId });
+        logger.warn('beav3r.fetch_failed', { approvalId, requestId });
       }
 
       if (nowSec > rec.payload.expiry + this.cfg.timeouts.expireSkewSec) {
@@ -227,7 +257,7 @@ export class OpenClawBeav3rBridge {
         this.metrics.reconciledPendingTimeoutTotal += 1;
         this.metrics.reconciliationLatencyMsCount += 1;
         this.metrics.reconciliationLatencyMsSum += reconciliationLatencyMs;
-        this.log('approval.stuck_reconciled', { approvalId, pendingForSec, requestId, reconciliationLatencyMs });
+        logger.warn('approval.stuck_reconciled', { approvalId, pendingForSec, requestId, reconciliationLatencyMs });
         await this.deliverTerminal(rec.payload.callback.url, {
           approvalId,
           status: 'timeout',
@@ -258,15 +288,42 @@ export class OpenClawBeav3rBridge {
 
     for (let i = 0; i <= this.cfg.callback.retries; i++) {
       try {
+        logger.debug('callback.delivery_attempt', {
+          approvalId: cb.approvalId,
+          status: cb.status,
+          url,
+          attempt: i + 1,
+        });
         const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-ocb-signature': sig }, body: raw });
-        if (res.ok || res.status === 202) return;
+        if (res.ok || res.status === 202) {
+          logger.info('callback.delivery_succeeded', {
+            approvalId: cb.approvalId,
+            status: cb.status,
+            url,
+            httpStatus: res.status,
+            attempt: i + 1,
+          });
+          return;
+        }
+        logger.warn('callback.delivery_non_ok', {
+          approvalId: cb.approvalId,
+          status: cb.status,
+          url,
+          httpStatus: res.status,
+          attempt: i + 1,
+        });
       } catch {
-        // noop
+        logger.warn('callback.delivery_exception', {
+          approvalId: cb.approvalId,
+          status: cb.status,
+          url,
+          attempt: i + 1,
+        });
       }
       await new Promise((r) => setTimeout(r, this.cfg.callback.backoffMs * (i + 1)));
     }
     this.metrics.callbackDeliveryFailedTotal += 1;
-    this.log('callback.delivery_failed', { approvalId: cb.approvalId });
+    logger.error('callback.delivery_failed', { approvalId: cb.approvalId });
   }
 
   private metricsSnapshot() {
@@ -298,9 +355,5 @@ export class OpenClawBeav3rBridge {
       queued,
       reason: rec.route === 'local' && !queued ? 'Beav3r unavailable fallback local' : undefined,
     };
-  }
-
-  private log(event: string, data: Record<string, unknown>) {
-    console.log(JSON.stringify({ ts: new Date().toISOString(), component: 'openclaw-beav3r-bridge', event, ...data }));
   }
 }

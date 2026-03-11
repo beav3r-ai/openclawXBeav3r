@@ -1,5 +1,6 @@
 import { HttpBeav3rClient } from './adapters/beav3r-client';
 import { OpenClawBeav3rBridge } from './bridge';
+import { logger } from './utils/logger';
 
 function intEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -50,17 +51,13 @@ app.get('/health', (_req, res) => {
 });
 
 const server = app.listen(port, host, () => {
-  console.log(
-    JSON.stringify({
-      ts: new Date().toISOString(),
-      component: 'openclaw-beav3r-bridge',
-      event: 'server.started',
-      host,
-      port,
-      beav3rUrl: process.env.BEAV3R_URL ?? 'http://127.0.0.1:3000',
-      pollMs,
-    })
-  );
+  logger.info('server.started', {
+    host,
+    port,
+    beav3rUrl: process.env.BEAV3R_URL ?? 'http://127.0.0.1:3000',
+    pollMs,
+    logLevel: logger.getLevel(),
+  });
 });
 
 bridge.startStateLoop();

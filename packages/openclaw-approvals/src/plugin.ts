@@ -4,6 +4,7 @@ import { OpenClawResolverAdapter } from './adapters/resolver';
 import { BridgeHandoffResponse, CallbackDecision, ResolveDecision } from './types/contracts';
 import { normalizeApprovalPayload, OpenClawApprovalInput } from './normalize';
 import { verifyHmac } from './utils/signature';
+import { logger } from './utils/logger';
 import { ApprovalRequestedEventSource } from './adapters/event-source';
 
 export function mapCallbackToResolve(decision: CallbackDecision): ResolveDecision {
@@ -20,19 +21,21 @@ export class OpenClawApprovalsPlugin {
 
   bindApprovalRequested(source: ApprovalRequestedEventSource, callbackUrl: string) {
     source.onApprovalRequested(async (evt) => {
-      this.log('approval.event_received', { approvalId: evt.approvalId, risk: evt.risk?.level, score: evt.risk?.score });
+      logger.debug('approval.event_received', { approvalId: evt.approvalId, risk: evt.risk?.level, score: evt.risk?.score });
       const handoff = await this.handoff(evt, callbackUrl);
-      this.log('approval.route_chosen', {
+      logger.info('approval.route_chosen', {
         approvalId: evt.approvalId,
+        status: handoff.status,
         route: handoff.route,
         queued: handoff.queued,
+        reason: handoff.reason,
       });
     });
   }
 
   async handoff(input: OpenClawApprovalInput, callbackUrl: string): Promise<BridgeHandoffResponse> {
     const payload = normalizeApprovalPayload(input, this.cfg, callbackUrl);
-    this.log('approval.handoff_sent', { approvalId: input.approvalId, bridgeUrl: this.cfg.bridge.bridgeUrl ?? 'http://localhost:4400' });
+    logger.info('approval.handoff_sent', { approvalId: input.approvalId, bridgeUrl: this.cfg.bridge.bridgeUrl ?? 'http://localhost:4400' });
     const res = await fetch(`${this.cfg.bridge.bridgeUrl ?? 'http://localhost:4400'}/handoff`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -58,29 +61,36 @@ export class OpenClawApprovalsPlugin {
       } catch {
         return res.status(400).json({ error: 'invalid callback payload' });
       }
-      this.log('approval.callback_received', { approvalId: body.approvalId, status: body.status, decision: body.decision });
+      logger.info('approval.callback_received', { approvalId: body.approvalId, status: body.status, decision: body.decision });
       const dedupeKey = `${body.approvalId}:${body.decidedAt}:${body.signature.value}`;
       if (this.seenCallbacks.has(dedupeKey)) {
+        logger.debug('approval.callback_duplicate_ignored', { approvalId: body.approvalId, status: body.status });
         return res.status(202).json({ status: 'duplicate_ignored' });
       }
       this.seenCallbacks.add(dedupeKey);
 
       const mapped = mapCallbackToResolve(body);
-      this.log('approval.resolve_called', { approvalId: body.approvalId, decision: mapped });
-      await this.resolver.resolveApproval({
-        approvalId: body.approvalId,
-        decision: mapped,
-        reason: body.reason,
-        metadata: body as unknown as Record<string, unknown>,
-      });
-      this.log('approval.resolve_result', { approvalId: body.approvalId, status: 'resolved' });
+      logger.info('approval.resolve_called', { approvalId: body.approvalId, decision: mapped });
+      try {
+        await this.resolver.resolveApproval({
+          approvalId: body.approvalId,
+          decision: mapped,
+          reason: body.reason,
+          metadata: body as unknown as Record<string, unknown>,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.warn('approval.resolve_failed', {
+          approvalId: body.approvalId,
+          decision: mapped,
+          message,
+        });
+        return res.status(502).json({ error: message });
+      }
+      logger.info('approval.resolve_result', { approvalId: body.approvalId, status: 'resolved' });
       return res.status(200).json({ status: 'resolved' });
     });
 
     return router;
-  }
-
-  private log(event: string, data: Record<string, unknown>) {
-    console.log(JSON.stringify({ ts: new Date().toISOString(), component: 'openclaw-approvals-plugin', event, ...data }));
   }
 }

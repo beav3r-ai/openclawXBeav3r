@@ -1,123 +1,92 @@
-# OpenClaw × Beav3r MVP (Option B lite)
+# OpenClaw × Beav3r
 
-Thin integration scaffold:
-- `packages/openclaw-approvals` → plugin-side normalizer, handoff sender, signed callback receiver, resolve adapter
-- `packages/openclaw-beav3r-bridge` → sidecar bridge with routing, idempotency, callbacks, retries, timeout transitions
+Thin local connector for routing OpenClaw exec approvals into a hosted Beav3r service.
 
-## Quickstart (Ndeto local)
+Components:
+- `packages/openclaw-approvals`: plugin-side normalizer, handoff sender, signed callback receiver, resolve adapter
+- `packages/openclaw-beav3r-bridge`: sidecar bridge with routing, idempotency, callbacks, retries, timeout transitions
+
+## Quick Docker Install
+From this repo:
+
 ```bash
-cd /Users/ndeto/.openclaw/workspace/openclawXbeav3r
-npm install
-npm test
-npm run demo
+npm run install:docker
 ```
 
-## Run against a real local Beav3r
-Start your Beav3r server first on `http://127.0.0.1:3000` or pass a different base URL:
+The installer:
+- prompts for hosted `BEAV3R_URL`
+- prompts for `BEAV3R_API_KEY`
+- sets `OPENCLAW_GATEWAY_URL` to `ws://host.docker.internal:18789` by default
+- generates `CALLBACK_SECRET`
+- writes `.env`
+- runs `docker compose up -d --build`
+
+Manual Docker flow:
 
 ```bash
-cd /Users/ndeto/.openclaw/workspace/openclawXbeav3r
-BEAV3R_URL=http://127.0.0.1:3000 npm run demo
+cp .env.example .env
+docker compose up -d --build
 ```
 
-The demo now:
-- starts the plugin callback server on `127.0.0.1:7771`
-- starts the bridge on `127.0.0.1:7772`
-- forwards the approval to your real Beav3r instance
-- polls Beav3r action status until your phone approval or denial resolves the callback
+Health checks:
 
-## Run as services
-You can now run the bridge and plugin harness as separate long-running services:
-
-Terminal 1:
 ```bash
-cd /Users/ndeto/.openclaw/workspace/openclawXbeav3r
+curl http://127.0.0.1:7771/health
+curl http://127.0.0.1:7772/health
+docker compose ps
+```
+
+Logs:
+
+```bash
+docker compose logs -f plugin
+docker compose logs -f bridge
+```
+
+Stop:
+
+```bash
+docker compose down
+```
+
+## Runtime Notes
+- OpenClaw stays on the host machine
+- Docker runs the plugin and bridge only
+- the plugin connects back to the host OpenClaw gateway with `OPENCLAW_GATEWAY_URL`
+- the bridge connects to hosted Beav3r with `BEAV3R_URL`
+
+Default local ports:
+- plugin: `127.0.0.1:7771`
+- bridge: `127.0.0.1:7772`
+
+## Local Dev Without Docker
+Bridge:
+
+```bash
 BEAV3R_URL=http://127.0.0.1:3000 npm run bridge
 ```
 
-Terminal 2:
-```bash
-cd /Users/ndeto/.openclaw/workspace/openclawXbeav3r
-BRIDGE_URL=http://127.0.0.1:7772 CALLBACK_SECRET=secret npm run plugin
-```
-
-Test the routing by posting an approval request to the plugin harness:
+Plugin:
 
 ```bash
-curl -X POST http://127.0.0.1:7771/handoff \
-  -H 'content-type: application/json' \
-  -d '{
-    "approvalId": "oc_appr_live_001",
-    "action": {
-      "tool": "exec",
-      "command": "kubectl apply -f prod.yaml",
-      "cwd": "/workspace",
-      "host": "gateway",
-      "node": null,
-      "systemRunPlan": {}
-    },
-    "risk": {
-      "score": 86,
-      "level": "high",
-      "reasons": ["prod_env", "deploy_action"]
-    },
-    "actor": {
-      "agentId": "main",
-      "sessionId": "agent:main:test",
-      "senderId": "telegram:12345",
-      "channel": "telegram"
-    },
-    "environment": {
-      "workspace": "/Users/ndeto/.openclaw/workspace",
-      "hostname": "gateway-host",
-      "envClass": "prod"
-    },
-    "expiry": 4102444800,
-    "nonce": "oc_live_nonce_001",
-    "reason": "Exec requires approval under policy",
-    "idempotencyKey": "oc_appr_live_001:1"
-  }'
+BRIDGE_URL=http://127.0.0.1:7772 CALLBACK_SECRET=secret npm run plugin:openclaw
 ```
 
-Then check resolved decisions after approving or denying in Beav3r:
-
-```bash
-curl http://127.0.0.1:7771/resolved
-```
-
-Current note:
-- the plugin service is a harness for testing routing before binding to a real OpenClaw event bus and resolver
-- the bridge service is the real long-running sidecar
-
-Expected demo output:
-- `handoff response: { approvalId: 'oc_appr_demo', status: 'accepted', route: 'beav3r', queued: true }`
-- resolver output includes decision `allow_once`
-
-## Test matrix coverage
-- payload normalization
-- canonical hash determinism
-- route local vs beav3r
-- callback HMAC verification
-- duplicate callback ignored
-- timeout deny/expire behavior
-- approval resolves correctly after beav3r approval
-- beav3r unavailable fallback behavior
-
-## Local beaver alignment
-Current adapter is wired to the live beaver API contract:
-- `POST {beav3r.baseUrl}/actions/request`
+## Current Beav3r API Alignment
+The bridge now uses Beav3r relay mode for OpenClaw approvals:
+- `POST {beav3r.baseUrl}/actions/relay`
 - `GET {beav3r.baseUrl}/actions/:actionId/status`
 - `POST {beav3r.baseUrl}/approvals/submit`
 - `POST {beav3r.baseUrl}/approvals/reject`
 
-Request mapping for `createDecisionRequest(payload)`:
+Request mapping:
 - `actionId <- approvalId`
-- `agentId <- actor.agentId`
-- `actionType <- action.tool`
-- `payload <- { command, cwd, host, node, systemRunPlan, reason, risk }`
-- `nonce <- payload.nonce`, `expiry <- payload.expiry`, `timestamp <- now`
+- `actionType <- openclaw.<tool>_approval_requested`
+- `payload <- execution context`
+- `attributes <- normalized OpenClaw facts`
+- `reason <- upstream OpenClaw approval reason`
 
 ## Docs
 - `docs/OPENCLAW_BEAV3R_INTEGRATION.md`
 - `docs/OPENCLAW_BEAV3R_HASH_SPEC.md`
-- `examples/docker-compose.openclaw-beav3r.yml`
+- `docker-compose.yml`

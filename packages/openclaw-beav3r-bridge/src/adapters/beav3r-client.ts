@@ -5,6 +5,7 @@ export type BeaverActionRequest = {
   agentId: string;
   actionType: string;
   payload: Record<string, unknown>;
+  attributes: Record<string, string | number | boolean | null>;
   timestamp: number;
   nonce: string;
   expiry: number;
@@ -39,34 +40,58 @@ export interface Beav3rClient {
 }
 
 export class HttpBeav3rClient implements Beav3rClient {
-  constructor(private readonly baseUrl: string, private readonly timeoutMs: number) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly timeoutMs: number,
+    private readonly apiKey?: string
+  ) {}
 
   async createDecisionRequest(payload: HandoffPayloadV1): Promise<{ requestId: string }> {
     const request: BeaverActionRequest = {
       actionId: payload.approvalId,
       agentId: payload.actor.agentId,
-      actionType: payload.action.tool,
+      actionType: `openclaw.${payload.action.tool}_approval_requested`,
       payload: {
         command: payload.action.command,
         cwd: payload.action.cwd,
         host: payload.action.host,
         node: payload.action.node,
         systemRunPlan: payload.action.systemRunPlan,
-        reason: payload.reason,
         risk: payload.risk,
+        callbackUrl: payload.callback.url,
+      },
+      attributes: {
+        tool: payload.action.tool,
+        command: payload.action.command,
+        host: payload.action.host ?? null,
+        node: payload.action.node,
+        risk_score: payload.risk.score,
+        risk_level: payload.risk.level,
+        environment: payload.environment.envClass,
+        channel: payload.actor.channel,
       },
       timestamp: Math.floor(Date.now() / 1000),
-      nonce: payload.nonce,
+      nonce: payload.nonce || payload.approvalId,
       expiry: payload.expiry,
     };
 
-    const res = await this.request('/actions/request', {
+    const res = await this.request('/actions/relay', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(request),
+      body: JSON.stringify({
+        action: request,
+        reason: payload.reason,
+        source: {
+          type: process.env.BEAV3R_ORIGIN_TYPE?.trim() || 'openclaw',
+          originLabel: resolveOriginLabel(payload),
+          metadata: buildOriginMetadata(payload),
+        },
+      }),
     });
 
-    if (!res.ok) throw new Error(`beaver action request failed: ${res.status}`);
+    if (!res.ok) {
+      throw new Error(`beaver relay request failed: ${res.status}${await this.describeError(res)}`);
+    }
     const body = (await res.json()) as BeaverActionRequestResult;
     return { requestId: body.actionId };
   }
@@ -74,7 +99,7 @@ export class HttpBeav3rClient implements Beav3rClient {
   async fetchDecision(requestId: string) {
     const res = await this.request(`/actions/${encodeURIComponent(requestId)}/status`);
     if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`beaver action status failed: ${res.status}`);
+    if (!res.ok) throw new Error(`beaver action status failed: ${res.status}${await this.describeError(res)}`);
 
     const body = (await res.json()) as BeaverActionStatusResult;
     if (body.status === 'pending') return null;
@@ -93,7 +118,7 @@ export class HttpBeav3rClient implements Beav3rClient {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(input),
     });
-    if (!res.ok) throw new Error(`beaver submit approval failed: ${res.status}`);
+    if (!res.ok) throw new Error(`beaver submit approval failed: ${res.status}${await this.describeError(res)}`);
     return (await res.json()) as { status: 'executed'; actionId: string };
   }
 
@@ -103,7 +128,7 @@ export class HttpBeav3rClient implements Beav3rClient {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(input),
     });
-    if (!res.ok) throw new Error(`beaver reject approval failed: ${res.status}`);
+    if (!res.ok) throw new Error(`beaver reject approval failed: ${res.status}${await this.describeError(res)}`);
     return (await res.json()) as { status: 'rejected'; actionId: string };
   }
 
@@ -111,9 +136,65 @@ export class HttpBeav3rClient implements Beav3rClient {
     const c = new AbortController();
     const t = setTimeout(() => c.abort(), this.timeoutMs);
     try {
-      return await fetch(`${this.baseUrl}${path}`, { ...init, signal: c.signal });
+      return await fetch(`${this.baseUrl}${path}`, {
+        ...init,
+        headers: {
+          ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
+          ...(init?.headers ?? {}),
+        },
+        signal: c.signal
+      });
     } finally {
       clearTimeout(t);
     }
   }
+
+  private async describeError(res: Response): Promise<string> {
+    const text = await res.text();
+    if (!text) {
+      return '';
+    }
+
+    try {
+      const body = JSON.parse(text) as { error?: string };
+      return body.error ? ` ${body.error}` : ` ${text}`;
+    } catch {
+      return ` ${text}`;
+    }
+  }
+}
+
+function resolveOriginLabel(payload: HandoffPayloadV1): string {
+  const configured = process.env.BEAV3R_ORIGIN_LABEL?.trim();
+  if (configured) {
+    return configured;
+  }
+
+  const hostname = payload.environment.hostname?.trim();
+  if (hostname) {
+    return `OpenClaw ${hostname}`;
+  }
+
+  const containerHostname = process.env.HOSTNAME?.trim();
+  if (containerHostname) {
+    return `OpenClaw ${containerHostname}`;
+  }
+
+  return `OpenClaw ${payload.actor.agentId}`;
+}
+
+function buildOriginMetadata(payload: HandoffPayloadV1): Record<string, unknown> {
+  return {
+    integration: 'openclaw',
+    tool: payload.action.tool,
+    agentId: payload.actor.agentId,
+    sessionId: payload.actor.sessionId,
+    senderId: payload.actor.senderId,
+    channel: payload.actor.channel,
+    hostname: payload.environment.hostname,
+    envClass: payload.environment.envClass,
+    workspace: payload.environment.workspace,
+    host: payload.action.host ?? null,
+    node: payload.action.node,
+  };
 }

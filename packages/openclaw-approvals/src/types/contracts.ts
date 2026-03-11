@@ -26,9 +26,10 @@ export interface HandoffPayloadV1 {
 
 export interface BridgeHandoffResponse {
   approvalId: string;
-  status: 'accepted';
+  status: 'accepted' | 'denied';
   route: 'beav3r' | 'local';
   queued: boolean;
+  reason?: string;
 }
 
 export interface CallbackDecision {

@@ -3,17 +3,14 @@ import express from 'express';
 import { buildPluginConfigFromEnv, resolvePluginServerBinding } from './config/from-env';
 import { bindOpenClawRuntime } from './runtime/openclaw-runtime';
 import { createGatewayRuntime } from './runtime/gateway-runtime';
+import { logger } from './utils/logger';
 
 const cfg = buildPluginConfigFromEnv();
 const binding = resolvePluginServerBinding();
 const resolved: Array<Record<string, unknown>> = [];
 
-function log(event: string, data: Record<string, unknown>) {
-  console.log(JSON.stringify({ ts: new Date().toISOString(), component: 'openclaw-approvals-plugin', event, ...data }));
-}
-
 const gatewayRuntime = createGatewayRuntime({
-  onEventLog: log,
+  onEventLog: (event, data) => logger.info(event, data),
 });
 
 const plugin = bindOpenClawRuntime({
@@ -47,12 +44,13 @@ app.get('/resolved', (_req, res) => {
 });
 
 const server = app.listen(binding.port, binding.host, () => {
-  log('server.started', {
+  logger.info('server.started', {
     host: binding.host,
     port: binding.port,
     bridgeUrl: cfg.bridge.bridgeUrl ?? 'http://127.0.0.1:7772',
     gatewayUrl: process.env.OPENCLAW_GATEWAY_URL ?? 'ws://127.0.0.1:18789',
     mode: 'openclaw-gateway',
+    logLevel: logger.getLevel(),
   });
   gatewayRuntime.start();
 });

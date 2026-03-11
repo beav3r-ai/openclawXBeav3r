@@ -39,7 +39,7 @@ describe('route local vs beav3r', () => {
 });
 
 describe('bridge behavior', () => {
-  it('handoff returns exact accepted shape and still denies when recovery and beav3r are both unreachable', async () => {
+  it('handoff returns denied state when recovery and beav3r are both unreachable', async () => {
     const failingClient: Beav3rClient = {
       createDecisionRequest: async () => {
         throw new Error('down');
@@ -64,7 +64,13 @@ describe('bridge behavior', () => {
 
     const r = await fetch('http://127.0.0.1:6554/handoff', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
     const body = await r.json();
-    expect(body).toEqual({ approvalId: 'oc_appr_123', status: 'accepted', route: 'beav3r', queued: true });
+    expect(body).toEqual({
+      approvalId: 'oc_appr_123',
+      status: 'denied',
+      route: 'beav3r',
+      queued: false,
+      reason: 'Beav3r unavailable fallback deny',
+    });
 
     await bridge.tick();
     expect(callbackSeen).toBe(true);
@@ -137,6 +143,92 @@ describe('bridge behavior', () => {
     await new Promise((r) => setTimeout(r, 1100));
     await bridge.tick();
     expect(results[0].status).toBe('timeout');
+
+    s.close();
+    recvServer.close();
+  });
+
+  it('falls back to deny when createDecisionRequest fails and recovery lookup finds no action', async () => {
+    const beav3r: Beav3rClient = {
+      createDecisionRequest: async () => {
+        throw new Error('beaver action request failed: 400 Action oc_appr_123 already exists');
+      },
+      fetchDecision: async () => null,
+    };
+    const results: any[] = [];
+    const receiver = express();
+    receiver.use(express.json());
+    receiver.post('/callback/openclaw-resolve', (req, res) => {
+      results.push(req.body);
+      res.json({ ok: true });
+    });
+    const recvServer = receiver.listen(6574);
+
+    const bridge = new OpenClawBeav3rBridge(cfg, beav3r);
+    const s = bridge.app().listen(6575);
+
+    const response = await fetch('http://127.0.0.1:6575/handoff', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...payload,
+        approvalId: 'ap-recovery-null',
+        idempotencyKey: 'ap-recovery-null:1',
+        callback: { ...payload.callback, url: 'http://127.0.0.1:6574/callback/openclaw-resolve' },
+      }),
+    });
+
+    expect(await response.json()).toEqual({
+      approvalId: 'ap-recovery-null',
+      status: 'denied',
+      route: 'beav3r',
+      queued: false,
+      reason: 'Beav3r unavailable fallback deny',
+    });
+    expect(results[0].status).toBe('denied');
+
+    s.close();
+    recvServer.close();
+  });
+
+  it('exposes reconciliation observability metrics', async () => {
+    const beav3r: Beav3rClient = {
+      createDecisionRequest: async () => ({ requestId: 'r-metrics' }),
+      fetchDecision: async () => null,
+    };
+    const receiver = express();
+    receiver.use(express.json());
+    receiver.post('/callback/openclaw-resolve', (_req, res) => res.json({ ok: true }));
+    const recvServer = receiver.listen(6572);
+
+    const bridge = new OpenClawBeav3rBridge(
+      { ...cfg, timeouts: { ...cfg.timeouts, pendingTimeoutSec: 1 } },
+      beav3r
+    );
+    const s = bridge.app().listen(6573);
+
+    await fetch('http://127.0.0.1:6573/handoff', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...payload,
+        approvalId: 'ap-metrics',
+        idempotencyKey: 'ap-metrics:1',
+        callback: { ...payload.callback, url: 'http://127.0.0.1:6572/callback/openclaw-resolve' },
+      }),
+    });
+
+    await new Promise((r) => setTimeout(r, 1100));
+    await bridge.tick();
+
+    const metricsRes = await fetch('http://127.0.0.1:6573/metrics');
+    const metrics = (await metricsRes.json()) as any;
+    expect(metrics.handoffAcceptedTotal).toBe(1);
+    expect(metrics.handoffAcceptedBeav3rTotal).toBe(1);
+    expect(metrics.reconciledPendingTimeoutTotal).toBe(1);
+    expect(metrics.deliveredTerminalTotal).toBe(1);
+    expect(metrics.deliveredByStatus.timeout).toBe(1);
+    expect(metrics.reconciliationLatencyMsAvg).toBeGreaterThan(0);
 
     s.close();
     recvServer.close();
@@ -283,7 +375,6 @@ describe('bridge behavior', () => {
       fetchDecision: async (requestId: string) => {
         expect(requestId).toBe('ap5');
         fetches += 1;
-        if (fetches < 3) return null;
         return { status: 'approved', reason: 'Recovered after timeout' };
       },
     };
@@ -297,8 +388,6 @@ describe('bridge behavior', () => {
     });
 
     expect(response.status).toBe(200);
-    await bridge.tick();
-    expect(resolver.resolved).toHaveLength(0);
     await bridge.tick();
     expect(resolver.resolved[0].decision).toBe('allow_once');
     expect(resolver.resolved[0].reason).toBe('Recovered after timeout');

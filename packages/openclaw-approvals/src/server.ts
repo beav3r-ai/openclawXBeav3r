@@ -6,6 +6,7 @@ import { OpenClawApprovalInput } from './normalize';
 import { bindOpenClawRuntime, OpenClawRuntimeLike } from './runtime/openclaw-runtime';
 import { adaptApprovalInput } from './adapters/schema-adapter';
 import { buildPluginConfigFromEnv, resolvePluginServerBinding } from './config/from-env';
+import { logger } from './utils/logger';
 
 function parseApprovalInput(value: unknown): OpenClawApprovalInput | null {
   try {
@@ -70,16 +71,12 @@ app.get('/resolved', (_req, res) => {
 });
 
 const server = app.listen(binding.port, binding.host, () => {
-  console.log(
-    JSON.stringify({
-      ts: new Date().toISOString(),
-      component: 'openclaw-approvals-plugin',
-      event: 'server.started',
-      host: binding.host,
-      port: binding.port,
-      bridgeUrl: process.env.BRIDGE_URL ?? 'http://127.0.0.1:7772',
-    })
-  );
+  logger.info('server.started', {
+    host: binding.host,
+    port: binding.port,
+    bridgeUrl: process.env.BRIDGE_URL ?? 'http://127.0.0.1:7772',
+    logLevel: logger.getLevel(),
+  });
 });
 
 function shutdown() {

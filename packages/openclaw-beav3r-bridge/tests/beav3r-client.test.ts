@@ -31,6 +31,7 @@ describe('HttpBeav3rClient (beaver endpoint contract)', () => {
       expect(body.action.agentId).toBe('main');
       expect(body.action.actionType).toBe('openclaw.exec_approval_requested');
       expect(body.action.payload.command).toBe('echo hi');
+      expect(body.action.payload.callbackUrl).toBe('http://bridge.local/beav3r/webhook');
       expect(headers?.authorization).toBe('Bearer test-key');
       expect(body.source).toMatchObject({
         type: 'openclaw',
@@ -59,7 +60,7 @@ describe('HttpBeav3rClient (beaver endpoint contract)', () => {
     });
     vi.stubGlobal('fetch', mockFetch);
 
-    const client = new HttpBeav3rClient('http://localhost:3000', 1000, 'test-key');
+    const client = new HttpBeav3rClient('http://localhost:3000', 1000, 'test-key', 'http://bridge.local/beav3r/webhook');
     const out = await client.createDecisionRequest(payload);
     expect(out).toEqual({ requestId: 'oc_appr_123' });
     expect(mockFetch.mock.calls[0][0]).toBe('http://localhost:3000/actions/relay');

@@ -1,5 +1,6 @@
 import { HttpBeav3rClient } from './adapters/beav3r-client';
 import { OpenClawBeav3rBridge } from './bridge';
+import { FileApprovalStore } from './state/store';
 import { logger } from './utils/logger';
 
 function intEnv(name: string, fallback: number): number {
@@ -9,6 +10,8 @@ function intEnv(name: string, fallback: number): number {
 
 const port = intEnv('BRIDGE_PORT', 7772);
 const host = process.env.BRIDGE_HOST ?? '127.0.0.1';
+const publicUrl = (process.env.BRIDGE_PUBLIC_URL ?? `http://${host}:${port}`).replace(/\/+$/, '');
+const stateDir = process.env.BRIDGE_STATE_DIR ?? '/tmp/openclaw-beav3r-bridge';
 const pollMs = intEnv('BRIDGE_POLL_MS', 1500);
 const timeoutMs = intEnv('BEAV3R_TIMEOUT_MS', 3000);
 
@@ -41,8 +44,10 @@ const bridge = new OpenClawBeav3rBridge(
   new HttpBeav3rClient(
     process.env.BEAV3R_URL ?? 'http://127.0.0.1:3000',
     timeoutMs,
-    process.env.BEAV3R_API_KEY
-  )
+    process.env.BEAV3R_API_KEY,
+    `${publicUrl}/beav3r/webhook`
+  ),
+  new FileApprovalStore(`${stateDir.replace(/\/+$/, '')}/approvals.json`)
 );
 
 const app = bridge.app();
@@ -54,6 +59,8 @@ const server = app.listen(port, host, () => {
   logger.info('server.started', {
     host,
     port,
+    publicUrl,
+    stateDir,
     beav3rUrl: process.env.BEAV3R_URL ?? 'http://127.0.0.1:3000',
     pollMs,
     logLevel: logger.getLevel(),

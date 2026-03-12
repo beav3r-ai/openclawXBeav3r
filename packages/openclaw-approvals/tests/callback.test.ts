@@ -1,5 +1,5 @@
 import express from 'express';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { NoopResolverAdapter } from '../src/adapters/resolver';
 import { OpenClawApprovalsPlugin } from '../src/plugin';
 import { computeHmacSha256 } from '../src/utils/signature';
@@ -117,6 +117,50 @@ describe('callback HMAC and duplicate protection', () => {
 
     expect(response.status).toBe(502);
     expect(await response.json()).toEqual({ error: 'unknown approval id' });
+    server.close();
+  });
+
+  it('retries the same callback after resolver failure instead of deduping it permanently', async () => {
+    let shouldFail = true;
+    const resolveApproval = vi.fn(async () => {
+      if (shouldFail) {
+        throw new Error('temporary failure');
+      }
+    });
+    const plugin = new OpenClawApprovalsPlugin(cfg, { resolveApproval });
+    const app = express();
+    app.use(plugin.callbackRouter());
+    const server = app.listen(18068);
+
+    const payload = {
+      approvalId: 'a3',
+      status: 'approved',
+      decision: 'allow-once',
+      decidedAt: 1773072802,
+      approver: { deviceId: 'd', publicKey: 'k', assurance: 'software' },
+      signature: { scheme: 'ed25519', value: 'sig3' },
+      reason: 'ok',
+      expiresAt: 1773076402,
+    };
+    const raw = JSON.stringify(payload);
+    const sig = computeHmacSha256(raw, 'secret');
+
+    const first = await fetch('http://127.0.0.1:18068/callback/openclaw-resolve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-ocb-signature': sig },
+      body: raw,
+    });
+    expect(first.status).toBe(502);
+
+    shouldFail = false;
+    const second = await fetch('http://127.0.0.1:18068/callback/openclaw-resolve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-ocb-signature': sig },
+      body: raw,
+    });
+    expect(second.status).toBe(200);
+    expect(resolveApproval).toHaveBeenCalledTimes(2);
+
     server.close();
   });
 });

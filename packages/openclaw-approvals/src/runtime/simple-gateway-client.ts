@@ -34,6 +34,8 @@ type SimpleGatewayClientOptions = {
   onHelloOk?: () => void;
   onConnectError?: (err: Error) => void;
   onClose?: (code: number, reason: string) => void;
+  reconnectDelayMs?: number;
+  reconnectMaxDelayMs?: number;
 };
 
 type DeviceIdentity = {
@@ -76,16 +78,23 @@ export class SimpleGatewayClient {
   private requestCounter = 0;
   private stopped = false;
   private connectRequestId: string | null = null;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private reconnectAttempt = 0;
 
   constructor(private readonly opts: SimpleGatewayClientOptions) {}
 
   start(): void {
     this.stopped = false;
+    this.reconnectAttempt = 0;
     this.open();
   }
 
   stop(): void {
     this.stopped = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.socket?.close();
     this.socket = null;
     for (const pending of this.pending.values()) {
@@ -122,10 +131,16 @@ export class SimpleGatewayClient {
   }
 
   private open(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
     const socket = new WebSocket(this.opts.url ?? 'ws://127.0.0.1:18789');
     this.socket = socket;
 
     socket.addEventListener('open', () => {
+      this.reconnectAttempt = 0;
       // wait for connect.challenge
     });
 
@@ -146,8 +161,26 @@ export class SimpleGatewayClient {
           pending.reject(new Error('Gateway websocket closed'));
         }
         this.pending.clear();
+        this.scheduleReconnect();
       }
     });
+  }
+
+  private scheduleReconnect(): void {
+    if (this.stopped || this.reconnectTimer) {
+      return;
+    }
+
+    const baseDelay = this.opts.reconnectDelayMs ?? 1000;
+    const maxDelay = this.opts.reconnectMaxDelayMs ?? 15000;
+    const delayMs = Math.min(baseDelay * 2 ** this.reconnectAttempt, maxDelay);
+    this.reconnectAttempt += 1;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (!this.stopped && !this.socket) {
+        this.open();
+      }
+    }, delayMs);
   }
 
   private async handleMessage(raw: string): Promise<void> {

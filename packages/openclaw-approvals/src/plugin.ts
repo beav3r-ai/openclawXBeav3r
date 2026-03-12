@@ -7,6 +7,17 @@ import { verifyHmac } from './utils/signature';
 import { logger } from './utils/logger';
 import { ApprovalRequestedEventSource } from './adapters/event-source';
 
+class HandoffError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode?: number
+  ) {
+    super(message);
+  }
+}
+
+class HandoffResponseError extends Error {}
+
 export function mapCallbackToResolve(decision: CallbackDecision): ResolveDecision {
   if (decision.status === 'approved' && decision.decision === 'allow-once') return 'allow_once';
   if (decision.status === 'denied' || decision.decision === 'deny') return 'deny';
@@ -16,20 +27,15 @@ export function mapCallbackToResolve(decision: CallbackDecision): ResolveDecisio
 
 export class OpenClawApprovalsPlugin {
   private seenCallbacks = new Set<string>();
+  private handoffRetryTimers = new Map<string, NodeJS.Timeout>();
+  private handoffRetryAttempts = new Map<string, number>();
 
   constructor(private readonly cfg: PluginConfig, private readonly resolver: OpenClawResolverAdapter) {}
 
   bindApprovalRequested(source: ApprovalRequestedEventSource, callbackUrl: string) {
     source.onApprovalRequested(async (evt) => {
       logger.debug('approval.event_received', { approvalId: evt.approvalId, risk: evt.risk?.level, score: evt.risk?.score });
-      const handoff = await this.handoff(evt, callbackUrl);
-      logger.info('approval.route_chosen', {
-        approvalId: evt.approvalId,
-        status: handoff.status,
-        route: handoff.route,
-        queued: handoff.queued,
-        reason: handoff.reason,
-      });
+      await this.processHandoff(evt, callbackUrl);
     });
   }
 
@@ -41,8 +47,12 @@ export class OpenClawApprovalsPlugin {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error(`Bridge handoff failed: ${res.status}`);
-    return (await res.json()) as BridgeHandoffResponse;
+    if (!res.ok) throw new HandoffError(`Bridge handoff failed: ${res.status}`, res.status);
+    try {
+      return (await res.json()) as BridgeHandoffResponse;
+    } catch (error) {
+      throw new HandoffResponseError(error instanceof Error ? error.message : String(error));
+    }
   }
 
   callbackRouter() {
@@ -67,8 +77,6 @@ export class OpenClawApprovalsPlugin {
         logger.debug('approval.callback_duplicate_ignored', { approvalId: body.approvalId, status: body.status });
         return res.status(202).json({ status: 'duplicate_ignored' });
       }
-      this.seenCallbacks.add(dedupeKey);
-
       const mapped = mapCallbackToResolve(body);
       logger.info('approval.resolve_called', { approvalId: body.approvalId, decision: mapped });
       try {
@@ -87,10 +95,70 @@ export class OpenClawApprovalsPlugin {
         });
         return res.status(502).json({ error: message });
       }
+      this.seenCallbacks.add(dedupeKey);
       logger.info('approval.resolve_result', { approvalId: body.approvalId, status: 'resolved' });
       return res.status(200).json({ status: 'resolved' });
     });
 
     return router;
+  }
+
+  private async processHandoff(input: OpenClawApprovalInput, callbackUrl: string): Promise<void> {
+    try {
+      const handoff = await this.handoff(input, callbackUrl);
+      this.clearHandoffRetry(input.approvalId);
+      logger.info('approval.route_chosen', {
+        approvalId: input.approvalId,
+        status: handoff.status,
+        route: handoff.route,
+        queued: handoff.queued,
+        reason: handoff.reason,
+      });
+    } catch (error) {
+      logger.warn('approval.handoff_failed', {
+        approvalId: input.approvalId,
+        bridgeUrl: this.cfg.bridge.bridgeUrl ?? 'http://localhost:4400',
+        message: error instanceof Error ? error.message : String(error),
+      });
+      if (this.shouldRetryHandoff(error)) {
+        this.scheduleHandoffRetry(input, callbackUrl);
+      }
+    }
+  }
+
+  private shouldRetryHandoff(error: unknown): boolean {
+    if (!(error instanceof HandoffError)) {
+      return !(error instanceof HandoffResponseError);
+    }
+
+    if (error.statusCode === undefined) {
+      return true;
+    }
+
+    return error.statusCode >= 500;
+  }
+
+  private scheduleHandoffRetry(input: OpenClawApprovalInput, callbackUrl: string): void {
+    if (this.handoffRetryTimers.has(input.approvalId)) {
+      return;
+    }
+
+    const attempt = this.handoffRetryAttempts.get(input.approvalId) ?? 0;
+    const delayMs = Math.min(1000 * 2 ** attempt, 15000);
+    this.handoffRetryAttempts.set(input.approvalId, attempt + 1);
+    const timer = setTimeout(() => {
+      this.handoffRetryTimers.delete(input.approvalId);
+      void this.processHandoff(input, callbackUrl);
+    }, delayMs);
+    this.handoffRetryTimers.set(input.approvalId, timer);
+  }
+
+  private clearHandoffRetry(approvalId: string): void {
+    const timer = this.handoffRetryTimers.get(approvalId);
+    if (timer) {
+      clearTimeout(timer);
+      this.handoffRetryTimers.delete(approvalId);
+    }
+    this.handoffRetryAttempts.delete(approvalId);
   }
 }

@@ -43,7 +43,8 @@ export class HttpBeav3rClient implements Beav3rClient {
   constructor(
     private readonly baseUrl: string,
     private readonly timeoutMs: number,
-    private readonly apiKey?: string
+    private readonly apiKey?: string,
+    private readonly callbackUrl?: string
   ) {}
 
   async createDecisionRequest(payload: HandoffPayloadV1): Promise<{ requestId: string }> {
@@ -58,7 +59,7 @@ export class HttpBeav3rClient implements Beav3rClient {
         node: payload.action.node,
         systemRunPlan: payload.action.systemRunPlan,
         risk: payload.risk,
-        callbackUrl: payload.callback.url,
+        callbackUrl: this.callbackUrl ?? resolveBridgeWebhookUrl(),
       },
       attributes: {
         tool: payload.action.tool,
@@ -162,6 +163,17 @@ export class HttpBeav3rClient implements Beav3rClient {
       return ` ${text}`;
     }
   }
+}
+
+function resolveBridgeWebhookUrl(): string {
+  const configured = process.env.BRIDGE_PUBLIC_URL?.trim();
+  if (configured) {
+    return `${configured.replace(/\/+$/, "")}/beav3r/webhook`;
+  }
+
+  const host = (process.env.BRIDGE_HOST ?? "127.0.0.1").trim();
+  const port = (process.env.BRIDGE_PORT ?? "7772").trim();
+  return `http://${host}:${port}/beav3r/webhook`;
 }
 
 function resolveOriginLabel(payload: HandoffPayloadV1): string {

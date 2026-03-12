@@ -21,8 +21,6 @@ type BridgeMetrics = {
 };
 
 export class OpenClawBeav3rBridge {
-  private requestToApproval = new Map<string, string>();
-  private approvalToRequest = new Map<string, string>();
   private callbackDedupe = new Set<string>();
   private timer?: NodeJS.Timeout;
   private metrics: BridgeMetrics = {
@@ -73,13 +71,11 @@ export class OpenClawBeav3rBridge {
       if (route === 'beav3r') {
         try {
           const reqId = await this.beav3r.createDecisionRequest(p);
-          this.requestToApproval.set(reqId.requestId, p.approvalId);
-          this.approvalToRequest.set(p.approvalId, reqId.requestId);
+          rec.requestId = reqId.requestId;
           rec.state = 'pending';
         } catch (error) {
           const recoverableRequestId = p.approvalId;
-          this.requestToApproval.set(recoverableRequestId, p.approvalId);
-          this.approvalToRequest.set(p.approvalId, recoverableRequestId);
+          rec.requestId = recoverableRequestId;
           logger.warn('handoff.beav3r_request_failed', {
             approvalId: p.approvalId,
             requestId: recoverableRequestId,
@@ -110,14 +106,20 @@ export class OpenClawBeav3rBridge {
                 reason: 'Beav3r unavailable fallback deny',
                 expiresAt: p.expiry,
               };
-              await this.sendCallback(p.callback.url, callback);
-              rec.state = 'denied';
               rec.terminal = callback;
+              rec.callbackSent = false;
               rec.updatedAt = Date.now();
+              const delivered = await this.sendCallback(p.callback.url, callback);
+              rec.callbackSent = delivered;
+              if (delivered) {
+                rec.state = 'denied';
+                rec.updatedAt = Date.now();
+              }
               logger.warn('handoff.fallback_denied', {
                 approvalId: p.approvalId,
                 route,
                 reason: callback.reason,
+                delivered,
               });
             } else {
               route = 'local';
@@ -152,9 +154,9 @@ export class OpenClawBeav3rBridge {
       logger.debug('beav3r.webhook.received', {
         body: req.body as Record<string, unknown>,
       });
-      const body = req.body as { requestId: string; status: 'approved' | 'denied'; reason?: string; signature?: string; approver?: CallbackDecision['approver'] };
-      const approvalId = this.requestToApproval.get(body.requestId);
-      if (!approvalId) {
+      const body = req.body as { requestId: string; status: 'approved' | 'denied' | 'expired'; reason?: string; signature?: string; approver?: CallbackDecision['approver'] };
+      const rec = this.store.getByRequestId(body.requestId);
+      if (!rec) {
         logger.warn('beav3r.webhook.unknown_request', {
           requestId: body.requestId,
           status: body.status,
@@ -162,15 +164,8 @@ export class OpenClawBeav3rBridge {
         });
         return res.status(404).json({ error: 'unknown request' });
       }
-      const rec = this.store.get(approvalId);
-      if (!rec) {
-        logger.warn('beav3r.webhook.missing_approval', {
-          approvalId,
-          requestId: body.requestId,
-        });
-        return res.status(404).json({ error: 'missing approval' });
-      }
-      if (['approved', 'denied', 'expired', 'timeout'].includes(rec.state)) {
+      const approvalId = rec.approvalId;
+      if (rec.callbackSent && ['approved', 'denied', 'expired', 'timeout'].includes(rec.state)) {
         logger.debug('beav3r.webhook.duplicate_ignored', {
           approvalId,
           requestId: body.requestId,
@@ -196,7 +191,10 @@ export class OpenClawBeav3rBridge {
         status: body.status,
         callbackUrl: rec.payload.callback.url,
       });
-      await this.deliverTerminal(rec.payload.callback.url, callback);
+      const delivered = await this.deliverTerminal(rec.payload.callback.url, callback);
+      if (!delivered) {
+        return res.status(502).json({ error: 'terminal callback delivery failed' });
+      }
       return res.json({ status: 'ok' });
     });
 
@@ -207,7 +205,13 @@ export class OpenClawBeav3rBridge {
     const nowSec = Math.floor(Date.now() / 1000);
     for (const rec of this.store.listPending()) {
       const approvalId = rec.approvalId;
-      const requestId = this.approvalToRequest.get(approvalId) ?? approvalId;
+
+      if (rec.callbackSent === false && rec.terminal) {
+        await this.deliverTerminal(rec.payload.callback.url, rec.terminal);
+        continue;
+      }
+
+      const requestId = rec.requestId ?? approvalId;
 
       try {
         const decision = await this.beav3r.fetchDecision(requestId);
@@ -272,17 +276,25 @@ export class OpenClawBeav3rBridge {
     }
   }
 
-  private async deliverTerminal(url: string, cb: CallbackDecision) {
+  private async deliverTerminal(url: string, cb: CallbackDecision): Promise<boolean> {
     const key = `${cb.approvalId}:${cb.status}:${cb.decidedAt}:${cb.signature.value}`;
-    if (this.callbackDedupe.has(key)) return;
+    const record = this.store.get(cb.approvalId);
+    if (this.callbackDedupe.has(key) || (record?.callbackSent && record.terminal?.status === cb.status)) {
+      return true;
+    }
+    this.store.markTerminal(cb.approvalId, cb, false);
+    const delivered = await this.sendCallback(url, cb);
+    if (!delivered) {
+      return false;
+    }
     this.callbackDedupe.add(key);
-    this.store.markTerminal(cb.approvalId, cb);
+    this.store.markTerminal(cb.approvalId, cb, true);
     this.metrics.deliveredTerminalTotal += 1;
     this.metrics.deliveredByStatus[cb.status] = (this.metrics.deliveredByStatus[cb.status] ?? 0) + 1;
-    await this.sendCallback(url, cb);
+    return true;
   }
 
-  private async sendCallback(url: string, cb: CallbackDecision) {
+  private async sendCallback(url: string, cb: CallbackDecision): Promise<boolean> {
     const raw = JSON.stringify(cb);
     const sig = hmac(raw, this.cfg.callback.secret);
 
@@ -303,7 +315,7 @@ export class OpenClawBeav3rBridge {
             httpStatus: res.status,
             attempt: i + 1,
           });
-          return;
+          return true;
         }
         logger.warn('callback.delivery_non_ok', {
           approvalId: cb.approvalId,
@@ -324,6 +336,7 @@ export class OpenClawBeav3rBridge {
     }
     this.metrics.callbackDeliveryFailedTotal += 1;
     logger.error('callback.delivery_failed', { approvalId: cb.approvalId });
+    return false;
   }
 
   private metricsSnapshot() {
@@ -337,13 +350,14 @@ export class OpenClawBeav3rBridge {
   }
 
   private toHandoffResponse(rec: ApprovalRecord): BridgeHandoffResponse {
+    const isDeniedPendingDelivery = rec.terminal?.status === 'denied' && rec.callbackSent === false;
     const queued = rec.route === 'beav3r' && rec.state === 'pending';
-    if (rec.state === 'denied') {
+    if (rec.state === 'denied' || isDeniedPendingDelivery) {
       return {
         approvalId: rec.approvalId,
         status: 'denied',
         route: rec.route,
-        queued,
+        queued: false,
         reason: rec.terminal?.reason ?? 'Approval denied',
       };
     }

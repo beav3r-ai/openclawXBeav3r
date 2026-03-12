@@ -1,7 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { computeActionHash } from '../src/utils/canonical';
 import { mapCallbackToResolve } from '../src/plugin';
 import { normalizeApprovalPayload } from '../src/normalize';
+import { OpenClawApprovalsPlugin } from '../src/plugin';
+import { InMemoryApprovalEventSource } from '../src/adapters/event-source';
 
 const cfg = {
   enabled: true,
@@ -71,5 +73,39 @@ describe('callback mapping', () => {
         expiresAt: 2,
       })
     ).toBe('allow_once');
+  });
+});
+
+describe('handoff retry', () => {
+  it('retries bridge handoff after transient failure', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('bridge down'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'accepted', route: 'beav3r', queued: true }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const source = new InMemoryApprovalEventSource();
+    const plugin = new OpenClawApprovalsPlugin(cfg, { resolveApproval: async () => undefined });
+    plugin.bindApprovalRequested(source, 'http://plugin.local/callback/openclaw-resolve');
+
+    const emitPromise = source.emit({
+      approvalId: 'retry-1',
+      action: { tool: 'exec', command: 'ls -la', node: null, systemRunPlan: { x: 1 } },
+      risk: { score: 86, level: 'high' },
+      actor: { agentId: 'main', sessionId: 's1', senderId: 'u1', channel: 'telegram' },
+      environment: { workspace: '/tmp', hostname: 'mac', envClass: 'prod' },
+      expiry: 1773076400,
+      nonce: 'abc',
+      reason: 'need approval',
+      idempotencyKey: 'retry-1:1',
+    });
+    await emitPromise;
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 });

@@ -1,9 +1,13 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import express from 'express';
 import { OpenClawBeav3rBridge } from '../src/bridge';
 import { Beav3rClient } from '../src/adapters/beav3r-client';
 import { chooseRoute } from '../src/policy/router';
 import { HandoffPayloadV1 } from '../src/types/contracts';
+import { FileApprovalStore } from '../src/state/store';
 import { OpenClawApprovalsPlugin } from '../../openclaw-approvals/src/plugin';
 import { NoopResolverAdapter } from '../../openclaw-approvals/src/adapters/resolver';
 
@@ -143,6 +147,90 @@ describe('bridge behavior', () => {
     await new Promise((r) => setTimeout(r, 1100));
     await bridge.tick();
     expect(results[0].status).toBe('timeout');
+
+    s.close();
+    recvServer.close();
+  });
+
+  it('retries terminal callback delivery after plugin callback failure', async () => {
+    const beav3r: Beav3rClient = {
+      createDecisionRequest: async () => ({ requestId: 'r-retry' }),
+      fetchDecision: async () => ({ status: 'approved', reason: 'Approved by signer' }),
+    };
+    let shouldFail = true;
+    const results: any[] = [];
+    const receiver = express();
+    receiver.use(express.json());
+    receiver.post('/callback/openclaw-resolve', (req, res) => {
+      results.push(req.body);
+      if (shouldFail) {
+        return res.status(502).json({ error: 'retry' });
+      }
+      return res.json({ ok: true });
+    });
+    const recvServer = receiver.listen(6576);
+
+    const bridge = new OpenClawBeav3rBridge(cfg, beav3r);
+    const s = bridge.app().listen(6577);
+
+    await fetch('http://127.0.0.1:6577/handoff', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...payload, approvalId: 'ap-retry', idempotencyKey: 'ap-retry:1', callback: { ...payload.callback, url: 'http://127.0.0.1:6576/callback/openclaw-resolve' } }),
+    });
+
+    await bridge.tick();
+    expect(results).toHaveLength(1);
+
+    shouldFail = false;
+    await bridge.tick();
+    expect(results).toHaveLength(2);
+
+    s.close();
+    recvServer.close();
+  });
+
+  it('retries fallback-deny callback delivery after initial plugin failure', async () => {
+    const beav3r: Beav3rClient = {
+      createDecisionRequest: async () => {
+        throw new Error('down');
+      },
+      fetchDecision: async () => null,
+    };
+    let shouldFail = true;
+    const results: any[] = [];
+    const receiver = express();
+    receiver.use(express.json());
+    receiver.post('/callback/openclaw-resolve', (req, res) => {
+      results.push(req.body);
+      if (shouldFail) {
+        return res.status(502).json({ error: 'retry' });
+      }
+      return res.json({ ok: true });
+    });
+    const recvServer = receiver.listen(6581);
+
+    const bridge = new OpenClawBeav3rBridge(cfg, beav3r);
+    const s = bridge.app().listen(6582);
+
+    const response = await fetch('http://127.0.0.1:6582/handoff', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...payload,
+        approvalId: 'ap-fallback-retry',
+        idempotencyKey: 'ap-fallback-retry:1',
+        callback: { ...payload.callback, url: 'http://127.0.0.1:6581/callback/openclaw-resolve' },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(results).toHaveLength(1);
+
+    shouldFail = false;
+    await bridge.tick();
+    expect(results).toHaveLength(2);
+    expect(results[1].status).toBe('denied');
 
     s.close();
     recvServer.close();
@@ -394,5 +482,46 @@ describe('bridge behavior', () => {
 
     s.close();
     pluginServer.close();
+  });
+
+  it('replays webhook delivery after bridge restart when state store is persisted', async () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-store-'));
+    const storePath = path.join(stateDir, 'approvals.json');
+    const beav3r: Beav3rClient = {
+      createDecisionRequest: async () => ({ requestId: 'r-persist' }),
+      fetchDecision: async () => null,
+    };
+    const results: any[] = [];
+    const receiver = express();
+    receiver.use(express.json());
+    receiver.post('/callback/openclaw-resolve', (req, res) => {
+      results.push(req.body);
+      res.json({ ok: true });
+    });
+    const recvServer = receiver.listen(6578);
+
+    const firstBridge = new OpenClawBeav3rBridge(cfg, beav3r, new FileApprovalStore(storePath));
+    const firstServer = firstBridge.app().listen(6579);
+    await fetch('http://127.0.0.1:6579/handoff', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...payload, approvalId: 'ap-persist', idempotencyKey: 'ap-persist:1', callback: { ...payload.callback, url: 'http://127.0.0.1:6578/callback/openclaw-resolve' } }),
+    });
+    firstServer.close();
+
+    const restartedBridge = new OpenClawBeav3rBridge(cfg, beav3r, new FileApprovalStore(storePath));
+    const restartedServer = restartedBridge.app().listen(6580);
+    const response = await fetch('http://127.0.0.1:6580/beav3r/webhook', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ requestId: 'r-persist', status: 'approved' }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(results[0].status).toBe('approved');
+
+    restartedServer.close();
+    recvServer.close();
+    fs.rmSync(stateDir, { recursive: true, force: true });
   });
 });

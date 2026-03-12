@@ -1,6 +1,6 @@
 import express from 'express';
 import { Beav3rClient } from './adapters/beav3r-client';
-import { chooseRoute, unavailableFallback } from './policy/router';
+import { chooseRouteWithReason, unavailableFallbackWithReason } from './policy/router';
 import { ApprovalRecord, ApprovalStore, InMemoryApprovalStore } from './state/store';
 import { BridgeConfig, CallbackDecision, HandoffPayloadV1 } from './types/contracts';
 import { logger } from './utils/logger';
@@ -64,9 +64,9 @@ export class OpenClawBeav3rBridge {
         return res.json(this.toHandoffResponse(existing));
       }
 
-      let route = chooseRoute(p, this.cfg);
+      let { route, routeReason } = chooseRouteWithReason(p, this.cfg);
       let queued = route === 'beav3r';
-      const rec: ApprovalRecord = { approvalId: p.approvalId, route, state: 'accepted', payload: p, updatedAt: Date.now() };
+      const rec: ApprovalRecord = { approvalId: p.approvalId, route, routeReason, state: 'accepted', payload: p, updatedAt: Date.now() };
 
       if (route === 'beav3r') {
         try {
@@ -94,8 +94,10 @@ export class OpenClawBeav3rBridge {
               error: error instanceof Error ? error.message : 'unknown error',
             });
           } catch {
-            const fb = unavailableFallback(p, this.cfg);
-            if (fb === 'deny') {
+            const fallback = unavailableFallbackWithReason(p, this.cfg);
+            routeReason = fallback.routeReason;
+            rec.routeReason = fallback.routeReason;
+            if (fallback.fallback === 'deny') {
               const callback: CallbackDecision = {
                 approvalId: p.approvalId,
                 status: 'denied',
@@ -118,6 +120,7 @@ export class OpenClawBeav3rBridge {
               logger.warn('handoff.fallback_denied', {
                 approvalId: p.approvalId,
                 route,
+                routeReason,
                 reason: callback.reason,
                 delivered,
               });
@@ -125,9 +128,11 @@ export class OpenClawBeav3rBridge {
               route = 'local';
               queued = false;
               rec.route = 'local';
+              rec.routeReason = routeReason;
               rec.updatedAt = Date.now();
               logger.warn('handoff.fallback_local', {
                 approvalId: p.approvalId,
+                routeReason,
                 reason: 'Beav3r unavailable fallback local',
               });
             }
@@ -143,6 +148,7 @@ export class OpenClawBeav3rBridge {
       logger.info('handoff.accepted', {
         approvalId: p.approvalId,
         route: response.route,
+        routeReason: response.routeReason,
         queued: response.queued,
         status: response.status,
         reason: response.reason,
@@ -169,6 +175,8 @@ export class OpenClawBeav3rBridge {
         logger.debug('beav3r.webhook.duplicate_ignored', {
           approvalId,
           requestId: body.requestId,
+          route: rec.route,
+          routeReason: rec.routeReason,
           state: rec.state,
         });
         return res.status(202).json({ status: 'duplicate_ignored' });
@@ -188,6 +196,8 @@ export class OpenClawBeav3rBridge {
       logger.info('beav3r.webhook.forwarding_terminal_callback', {
         approvalId,
         requestId: body.requestId,
+        route: rec.route,
+        routeReason: rec.routeReason,
         status: body.status,
         callbackUrl: rec.payload.callback.url,
       });
@@ -357,6 +367,7 @@ export class OpenClawBeav3rBridge {
         approvalId: rec.approvalId,
         status: 'denied',
         route: rec.route,
+        routeReason: rec.routeReason,
         queued: false,
         reason: rec.terminal?.reason ?? 'Approval denied',
       };
@@ -366,6 +377,7 @@ export class OpenClawBeav3rBridge {
       approvalId: rec.approvalId,
       status: 'accepted',
       route: rec.route,
+      routeReason: rec.routeReason,
       queued,
       reason: rec.route === 'local' && !queued ? 'Beav3r unavailable fallback local' : undefined,
     };

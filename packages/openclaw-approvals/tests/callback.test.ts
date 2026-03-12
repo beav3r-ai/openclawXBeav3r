@@ -163,4 +163,34 @@ describe('callback HMAC and duplicate protection', () => {
 
     server.close();
   });
+
+  it('rejects invalid callback status/decision combinations deterministically', async () => {
+    const plugin = new OpenClawApprovalsPlugin(cfg, new NoopResolverAdapter());
+    const app = express();
+    app.use(plugin.callbackRouter());
+    const server = app.listen(18069);
+
+    const payload = {
+      approvalId: 'a4',
+      status: 'approved',
+      decision: 'deny',
+      decidedAt: 1773072803,
+      approver: { deviceId: 'd', publicKey: 'k', assurance: 'software' },
+      signature: { scheme: 'ed25519', value: 'sig4' },
+      reason: 'bad',
+      expiresAt: 1773076403,
+    };
+    const raw = JSON.stringify(payload);
+    const sig = computeHmacSha256(raw, 'secret');
+
+    const response = await fetch('http://127.0.0.1:18069/callback/openclaw-resolve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-ocb-signature': sig },
+      body: raw,
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'approved callbacks must use allow-once decision' });
+    server.close();
+  });
 });

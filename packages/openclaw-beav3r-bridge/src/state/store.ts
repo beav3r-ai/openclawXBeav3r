@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { ApprovalState, CallbackDecision, HandoffPayloadV1, Route } from '../types/contracts';
+import { ApprovalState, CallbackDecision, HandoffPayloadV1, Route, RouteReason } from '../types/contracts';
 
 export interface ApprovalRecord {
   approvalId: string;
   route: Route;
+  routeReason?: RouteReason;
   state: ApprovalState;
   payload: HandoffPayloadV1;
   requestId?: string;

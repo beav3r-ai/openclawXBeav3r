@@ -48,6 +48,7 @@ export class HttpBeav3rClient implements Beav3rClient {
   ) {}
 
   async createDecisionRequest(payload: HandoffPayloadV1): Promise<{ requestId: string }> {
+    const presentation = buildPresentationMetadata(payload);
     const request: BeaverActionRequest = {
       actionId: payload.approvalId,
       agentId: payload.actor.agentId,
@@ -60,6 +61,7 @@ export class HttpBeav3rClient implements Beav3rClient {
         systemRunPlan: payload.action.systemRunPlan,
         risk: payload.risk,
         callbackUrl: this.callbackUrl ?? resolveBridgeWebhookUrl(),
+        presentation,
       },
       attributes: {
         tool: payload.action.tool,
@@ -70,6 +72,9 @@ export class HttpBeav3rClient implements Beav3rClient {
         risk_level: payload.risk.level,
         environment: payload.environment.envClass,
         channel: payload.actor.channel,
+        display_title: presentation.title,
+        display_category: presentation.category,
+        project_label: presentation.contextValue,
       },
       timestamp: Math.floor(Date.now() / 1000),
       nonce: payload.nonce || payload.approvalId,
@@ -162,6 +167,108 @@ export class HttpBeav3rClient implements Beav3rClient {
     } catch {
       return ` ${text}`;
     }
+  }
+}
+
+type PresentationMetadata = {
+  category: string;
+  title: string;
+  subtitle: string;
+  contextLabel: string;
+  contextValue: string;
+  technicalType: string;
+  fullCommand: string;
+  riskLabel: string;
+};
+
+function buildPresentationMetadata(payload: HandoffPayloadV1): PresentationMetadata {
+  const category = classifyCommandCategory(payload.action.command);
+  const projectLabel = deriveProjectLabel(payload);
+  return {
+    category,
+    title: category,
+    subtitle: `OpenClaw wants to ${describeIntent(category).toLowerCase()} in ${projectLabel}`,
+    contextLabel: 'Project',
+    contextValue: projectLabel,
+    technicalType: `openclaw.${payload.action.tool}_approval_requested`,
+    fullCommand: payload.action.command,
+    riskLabel: formatRiskLabel(payload.risk.level),
+  };
+}
+
+function classifyCommandCategory(command: string): string {
+  const trimmed = command.trim();
+  const firstToken = trimmed.split(/\s+/)[0] ?? '';
+  const normalized = firstToken.toLowerCase();
+  if (['ls', 'pwd', 'cat', 'head', 'tail', 'less', 'more', 'find', 'rg', 'grep', 'tree'].includes(normalized)) {
+    return 'Read project files';
+  }
+  if (['rm', 'rmdir', 'unlink', 'shred'].includes(normalized)) {
+    return 'Delete project files';
+  }
+  if (['mv', 'rename'].includes(normalized)) {
+    return 'Move or rename files';
+  }
+  if (['chmod', 'chown', 'chgrp'].includes(normalized)) {
+    return 'Change file permissions';
+  }
+  if (['touch', 'tee', 'sed', 'awk', 'perl', 'python', 'python3', 'node'].includes(normalized) || looksLikeWriteCommand(trimmed)) {
+    return 'Modify project files';
+  }
+  return 'Run shell command';
+}
+
+function looksLikeWriteCommand(command: string): boolean {
+  return /(>>|>|sed\s+-i\b|perl\s+-i\b|python(?:3)?\s+-c\b|node\s+-e\b)/.test(command);
+}
+
+function deriveProjectLabel(payload: HandoffPayloadV1): string {
+  const workspace = payload.environment.workspace?.trim();
+  if (workspace) {
+    const parts = workspace.replace(/\/+$/, '').split('/').filter(Boolean);
+    const last = parts[parts.length - 1];
+    if (last) {
+      return last;
+    }
+  }
+  const cwd = payload.action.cwd?.trim();
+  if (cwd) {
+    const parts = cwd.replace(/\/+$/, '').split('/').filter(Boolean);
+    const last = parts[parts.length - 1];
+    if (last) {
+      return last;
+    }
+  }
+  return payload.actor.agentId;
+}
+
+function describeIntent(category: string): string {
+  switch (category) {
+    case 'Read project files':
+      return 'inspect files';
+    case 'Modify project files':
+      return 'modify files';
+    case 'Delete project files':
+      return 'delete files';
+    case 'Move or rename files':
+      return 'move or rename files';
+    case 'Change file permissions':
+      return 'change file permissions';
+    default:
+      return 'run a shell command';
+  }
+}
+
+function formatRiskLabel(level: HandoffPayloadV1['risk']['level']): string {
+  switch (level) {
+    case 'critical':
+      return 'Critical';
+    case 'high':
+      return 'Elevated';
+    case 'medium':
+      return 'Elevated';
+    default:
+      return 'Routine';
   }
 }
 

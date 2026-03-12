@@ -32,6 +32,16 @@ describe('HttpBeav3rClient (beaver endpoint contract)', () => {
       expect(body.action.actionType).toBe('openclaw.exec_approval_requested');
       expect(body.action.payload.command).toBe('echo hi');
       expect(body.action.payload.callbackUrl).toBe('http://bridge.local/beav3r/webhook');
+      expect(body.action.payload.presentation).toMatchObject({
+        category: 'Run shell command',
+        title: 'Run shell command',
+        subtitle: 'OpenClaw wants to run a shell command in w',
+        contextLabel: 'Project',
+        contextValue: 'w',
+        technicalType: 'openclaw.exec_approval_requested',
+        fullCommand: 'echo hi',
+        riskLabel: 'Elevated',
+      });
       expect(headers?.authorization).toBe('Bearer test-key');
       expect(body.source).toMatchObject({
         type: 'openclaw',
@@ -55,6 +65,9 @@ describe('HttpBeav3rClient (beaver endpoint contract)', () => {
         risk_score: 86,
         risk_level: 'high',
         environment: 'prod',
+        display_title: 'Run shell command',
+        display_category: 'Run shell command',
+        project_label: 'w',
       });
       return new Response(JSON.stringify({ status: 'pending', actionId: 'oc_appr_123', actionHash: 'h', reason: 'approval required' }), { status: 200 });
     });

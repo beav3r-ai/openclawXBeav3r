@@ -22,14 +22,22 @@ export class OpenClawApprovalsPlugin {
   bindApprovalRequested(source: ApprovalRequestedEventSource, callbackUrl: string) {
     source.onApprovalRequested(async (evt) => {
       logger.debug('approval.event_received', { approvalId: evt.approvalId, risk: evt.risk?.level, score: evt.risk?.score });
-      const handoff = await this.handoff(evt, callbackUrl);
-      logger.info('approval.route_chosen', {
-        approvalId: evt.approvalId,
-        status: handoff.status,
-        route: handoff.route,
-        queued: handoff.queued,
-        reason: handoff.reason,
-      });
+      try {
+        const handoff = await this.handoff(evt, callbackUrl);
+        logger.info('approval.route_chosen', {
+          approvalId: evt.approvalId,
+          status: handoff.status,
+          route: handoff.route,
+          queued: handoff.queued,
+          reason: handoff.reason,
+        });
+      } catch (error) {
+        logger.warn('approval.handoff_failed', {
+          approvalId: evt.approvalId,
+          bridgeUrl: this.cfg.bridge.bridgeUrl ?? 'http://localhost:4400',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
     });
   }
 

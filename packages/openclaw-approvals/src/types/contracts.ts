@@ -30,6 +30,7 @@ export interface BridgeHandoffResponse {
   route: 'beav3r' | 'local';
   queued: boolean;
   reason?: string;
+  routeReason?: string;
 }
 
 export interface CallbackDecision {

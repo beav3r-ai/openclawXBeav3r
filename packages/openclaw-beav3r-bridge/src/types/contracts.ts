@@ -27,6 +27,16 @@ export interface CallbackDecision {
 }
 
 export type Route = 'local' | 'beav3r';
+export type RouteReason =
+  | 'env_override'
+  | 'risk_level_high'
+  | 'risk_level_critical'
+  | 'risk_score_local_threshold'
+  | 'risk_score_beav3r_threshold'
+  | 'medium_fallback_local'
+  | 'medium_fallback_beav3r'
+  | 'beav3r_unavailable_fallback_local'
+  | 'beav3r_unavailable_fallback_deny';
 export type ApprovalState = 'accepted' | 'pending' | 'approved' | 'denied' | 'expired' | 'timeout';
 
 export interface BridgeConfig {

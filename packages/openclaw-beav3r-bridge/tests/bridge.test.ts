@@ -74,6 +74,7 @@ describe('bridge behavior', () => {
       route: 'beav3r',
       queued: false,
       reason: 'Beav3r unavailable fallback deny',
+      routeReason: 'beav3r_unavailable_fallback_deny',
     });
 
     await bridge.tick();
@@ -272,11 +273,33 @@ describe('bridge behavior', () => {
       route: 'beav3r',
       queued: false,
       reason: 'Beav3r unavailable fallback deny',
+      routeReason: 'beav3r_unavailable_fallback_deny',
     });
     expect(results[0].status).toBe('denied');
 
     s.close();
     recvServer.close();
+  });
+
+  it('returns routeReason for deterministic routing decisions', async () => {
+    const beav3r: Beav3rClient = {
+      createDecisionRequest: async () => ({ requestId: 'r-route-reason' }),
+      fetchDecision: async () => null,
+    };
+
+    const bridge = new OpenClawBeav3rBridge(cfg, beav3r);
+    const server = bridge.app().listen(6587);
+
+    const response = await fetch('http://127.0.0.1:6587/handoff', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const body = await response.json();
+    expect(body.route).toBe('beav3r');
+    expect(body.routeReason).toBe('risk_level_high');
+
+    server.close();
   });
 
   it('exposes reconciliation observability metrics', async () => {

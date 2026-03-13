@@ -21,6 +21,34 @@ The installer:
 - writes `.env`
 - runs `docker compose up -d --build`
 
+Default hosted Beav3r target:
+- `https://api.beav3r.ai`
+- override with `BEAV3R_URL=...` when needed
+
+## Quick Curl Install
+For a one-liner install that clones the bridge repo, writes `.env`, and starts Docker:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ndeto/openclawXBeav3r/main/scripts/bootstrap-docker.sh | \
+  BEAV3R_API_KEY=bvr_test_replace_me sh
+```
+
+Optional overrides:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ndeto/openclawXBeav3r/main/scripts/bootstrap-docker.sh | \
+  BEAV3R_API_KEY=bvr_test_replace_me \
+  BEAV3R_URL=https://api.beav3r.ai \
+  OPENCLAW_GATEWAY_URL=ws://host.docker.internal:18789 \
+  sh
+```
+
+Notes:
+- if `BEAV3R_URL` is not set, the installer defaults to `https://api.beav3r.ai`
+- `BEAV3R_API_KEY` can be pasted inline as an env var
+- the repo is installed under `~/.beav3r/openclaw-bridge` by default
+- override that with `INSTALL_DIR=/your/path` if needed
+
 Manual Docker flow:
 
 ```bash

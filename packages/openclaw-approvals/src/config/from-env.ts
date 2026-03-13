@@ -20,7 +20,7 @@ export function buildPluginConfigFromEnv(): PluginConfig {
       high: (process.env.FALLBACK_HIGH as 'local' | 'deny' | undefined) ?? 'deny',
     },
     beav3r: {
-      baseUrl: process.env.BEAV3R_URL ?? 'http://127.0.0.1:3000',
+      baseUrl: process.env.BEAV3R_URL ?? 'https://api.beav3r.ai',
       timeoutMs: intEnv('BEAV3R_TIMEOUT_MS', 3000),
     },
     bridge: {

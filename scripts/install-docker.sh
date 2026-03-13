@@ -12,6 +12,10 @@ require_cmd() {
   fi
 }
 
+is_tty() {
+  [ -t 0 ]
+}
+
 prompt_value() {
   key="$1"
   prompt="$2"
@@ -19,15 +23,23 @@ prompt_value() {
   current_value="${4:-}"
   value="$current_value"
   if [ -z "$value" ]; then
-    if [ -n "$default_value" ]; then
-      printf "%s [%s]: " "$prompt" "$default_value" >&2
+    if is_tty; then
+      if [ -n "$default_value" ]; then
+        printf "%s [%s]: " "$prompt" "$default_value" >&2
+      else
+        printf "%s: " "$prompt" >&2
+      fi
+      IFS= read -r value
+      if [ -z "$value" ]; then
+        value="$default_value"
+      fi
     else
-      printf "%s: " "$prompt" >&2
-    fi
-    IFS= read -r value
-    if [ -z "$value" ]; then
       value="$default_value"
     fi
+  fi
+  if [ -z "$value" ]; then
+    echo "Missing required value for $key" >&2
+    exit 1
   fi
   printf "%s" "$value"
 }
@@ -65,12 +77,12 @@ get_existing() {
   grep "^${key}=" "$ENV_FILE" | tail -n 1 | cut -d'=' -f2-
 }
 
-BEAV3R_URL=$(prompt_value "BEAV3R_URL" "Hosted Beav3r URL" "https://api.beav3r.example" "$(get_existing BEAV3R_URL)")
-BEAV3R_API_KEY=$(prompt_value "BEAV3R_API_KEY" "Beav3r API key" "" "$(get_existing BEAV3R_API_KEY)")
-OPENCLAW_GATEWAY_URL=$(prompt_value "OPENCLAW_GATEWAY_URL" "OpenClaw gateway URL" "ws://host.docker.internal:18789" "$(get_existing OPENCLAW_GATEWAY_URL)")
-OPENCLAW_STATE_HOST_PATH=$(prompt_value "OPENCLAW_STATE_HOST_PATH" "OpenClaw state directory on host" "$HOME/.openclaw" "$(get_existing OPENCLAW_STATE_HOST_PATH)")
-OPENCLAW_STATE_DIR=$(prompt_value "OPENCLAW_STATE_DIR" "OpenClaw state directory in container" "/openclaw-state" "$(get_existing OPENCLAW_STATE_DIR)")
-PLUGIN_PUBLIC_URL=$(prompt_value "PLUGIN_PUBLIC_URL" "Plugin public URL" "http://127.0.0.1:7771" "$(get_existing PLUGIN_PUBLIC_URL)")
+BEAV3R_URL=$(prompt_value "BEAV3R_URL" "Hosted Beav3r URL" "https://api.beav3r.ai" "${BEAV3R_URL:-$(get_existing BEAV3R_URL)}")
+BEAV3R_API_KEY=$(prompt_value "BEAV3R_API_KEY" "Beav3r API key" "" "${BEAV3R_API_KEY:-$(get_existing BEAV3R_API_KEY)}")
+OPENCLAW_GATEWAY_URL=$(prompt_value "OPENCLAW_GATEWAY_URL" "OpenClaw gateway URL" "ws://host.docker.internal:18789" "${OPENCLAW_GATEWAY_URL:-$(get_existing OPENCLAW_GATEWAY_URL)}")
+OPENCLAW_STATE_HOST_PATH=$(prompt_value "OPENCLAW_STATE_HOST_PATH" "OpenClaw state directory on host" "$HOME/.openclaw" "${OPENCLAW_STATE_HOST_PATH:-$(get_existing OPENCLAW_STATE_HOST_PATH)}")
+OPENCLAW_STATE_DIR=$(prompt_value "OPENCLAW_STATE_DIR" "OpenClaw state directory in container" "/openclaw-state" "${OPENCLAW_STATE_DIR:-$(get_existing OPENCLAW_STATE_DIR)}")
+PLUGIN_PUBLIC_URL=$(prompt_value "PLUGIN_PUBLIC_URL" "Plugin public URL" "http://127.0.0.1:7771" "${PLUGIN_PUBLIC_URL:-$(get_existing PLUGIN_PUBLIC_URL)}")
 CALLBACK_SECRET=$(get_existing CALLBACK_SECRET)
 if [ -z "$CALLBACK_SECRET" ]; then
   CALLBACK_SECRET=$(random_secret)

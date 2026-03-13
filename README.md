@@ -25,6 +25,11 @@ curl -fsSL https://raw.githubusercontent.com/beav3r-ai/openclawXBeav3r/main/scri
   sh
 ```
 
+Docker callback routing note:
+
+- the bridge calls back into the plugin over the Docker network
+- leave `PLUGIN_PUBLIC_URL` at the default `http://plugin:7771` unless you are deliberately exposing the plugin outside Docker
+
 ## Repo-local install
 If you already cloned this repo:
 

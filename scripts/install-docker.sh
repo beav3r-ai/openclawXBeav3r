@@ -82,7 +82,7 @@ BEAV3R_API_KEY=$(prompt_value "BEAV3R_API_KEY" "Beav3r API key" "" "${BEAV3R_API
 OPENCLAW_GATEWAY_URL=$(prompt_value "OPENCLAW_GATEWAY_URL" "OpenClaw gateway URL" "ws://host.docker.internal:18789" "${OPENCLAW_GATEWAY_URL:-$(get_existing OPENCLAW_GATEWAY_URL)}")
 OPENCLAW_STATE_HOST_PATH=$(prompt_value "OPENCLAW_STATE_HOST_PATH" "OpenClaw state directory on host" "$HOME/.openclaw" "${OPENCLAW_STATE_HOST_PATH:-$(get_existing OPENCLAW_STATE_HOST_PATH)}")
 OPENCLAW_STATE_DIR=$(prompt_value "OPENCLAW_STATE_DIR" "OpenClaw state directory in container" "/openclaw-state" "${OPENCLAW_STATE_DIR:-$(get_existing OPENCLAW_STATE_DIR)}")
-PLUGIN_PUBLIC_URL=$(prompt_value "PLUGIN_PUBLIC_URL" "Plugin public URL" "http://127.0.0.1:7771" "${PLUGIN_PUBLIC_URL:-$(get_existing PLUGIN_PUBLIC_URL)}")
+PLUGIN_PUBLIC_URL=$(prompt_value "PLUGIN_PUBLIC_URL" "Plugin callback URL for the bridge" "http://plugin:7771" "${PLUGIN_PUBLIC_URL:-$(get_existing PLUGIN_PUBLIC_URL)}")
 CALLBACK_SECRET=$(get_existing CALLBACK_SECRET)
 if [ -z "$CALLBACK_SECRET" ]; then
   CALLBACK_SECRET=$(random_secret)

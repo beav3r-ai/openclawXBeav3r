@@ -2,8 +2,8 @@
 set -eu
 
 REPO_URL=${REPO_URL:-https://github.com/beav3r-ai/openclawXBeav3r.git}
-INSTALL_DIR=${INSTALL_DIR:-"$HOME/.beav3r/openclaw-bridge"}
 REPO_REF=${REPO_REF:-main}
+BOOTSTRAP_DIR=${BOOTSTRAP_DIR:-}
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -15,15 +15,23 @@ require_cmd() {
 require_cmd git
 require_cmd sh
 
-mkdir -p "$(dirname "$INSTALL_DIR")"
+cleanup() {
+  if [ -n "${CLONE_DIR:-}" ] && [ -d "$CLONE_DIR" ]; then
+    rm -rf "$CLONE_DIR"
+  fi
+}
 
-if [ ! -d "$INSTALL_DIR/.git" ]; then
-  git clone --branch "$REPO_REF" --depth 1 "$REPO_URL" "$INSTALL_DIR"
+trap cleanup EXIT INT TERM
+
+if [ -n "$BOOTSTRAP_DIR" ]; then
+  rm -rf "$BOOTSTRAP_DIR"
+  mkdir -p "$(dirname "$BOOTSTRAP_DIR")"
+  CLONE_DIR="$BOOTSTRAP_DIR"
 else
-  git -C "$INSTALL_DIR" fetch origin "$REPO_REF"
-  git -C "$INSTALL_DIR" checkout "$REPO_REF"
-  git -C "$INSTALL_DIR" pull --ff-only origin "$REPO_REF"
+  CLONE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/openclaw-beav3r-bootstrap.XXXXXX")
 fi
 
-cd "$INSTALL_DIR"
-exec sh scripts/install-docker.sh
+git clone --branch "$REPO_REF" --depth 1 "$REPO_URL" "$CLONE_DIR"
+
+cd "$CLONE_DIR"
+sh scripts/install-docker.sh

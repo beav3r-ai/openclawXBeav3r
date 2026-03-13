@@ -16,7 +16,7 @@ Always:
 ### Callback payload
 Implemented in plugin + bridge contracts, HMAC signed with `x-ocb-signature`.
 
-## Priority order (implemented per TASKS.md)
+## Priority order
 1. Canonical hash payload + determinism tests
 2. Bridge `POST /handoff`
 3. Plugin listener adapter for `exec.approval.requested`

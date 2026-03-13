@@ -18,3 +18,4 @@ firebase*.json
 *service-account*.json
 **/*service-account*.json
 *.p8
+docs

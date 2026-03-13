@@ -45,7 +45,7 @@ async function main() {
       action: { tool: 'exec', command: 'kubectl apply -f prod.yaml', cwd: '/workspace', host: 'gateway', node: null, systemRunPlan: {} },
       risk: { score: 86, level: 'high', reasons: ['prod_env', 'deploy_action'] },
       actor: { agentId: 'main', sessionId: 'agent:main:demo', senderId: 'telegram:12345', channel: 'telegram' },
-      environment: { workspace: '/Users/ndeto/.openclaw/workspace', hostname: 'gateway-host', envClass: 'prod' },
+      environment: { workspace: '$HOME/.openclaw/workspace', hostname: 'gateway-host', envClass: 'prod' },
       expiry: Math.floor(Date.now() / 1000) + 300,
       nonce: 'random_128b',
       reason: 'Exec requires approval under policy',

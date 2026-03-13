@@ -2,6 +2,11 @@
   "name": "openclawxbeav3r",
   "private": true,
   "version": "0.1.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/beav3r-ai/openclawXBeav3r.git"
+  },
   "workspaces": [
     "packages/*"
   ],

@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-REPO_URL=${REPO_URL:-https://github.com/ndeto/openclawXBeav3r.git}
+REPO_URL=${REPO_URL:-https://github.com/beav3r-ai/openclawXBeav3r.git}
 INSTALL_DIR=${INSTALL_DIR:-"$HOME/.beav3r/openclaw-bridge"}
 REPO_REF=${REPO_REF:-main}
 

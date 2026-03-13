@@ -15,7 +15,8 @@
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
-    "install:docker": "sh scripts/install-docker.sh"
+    "install:docker": "sh scripts/install-docker.sh",
+    "bootstrap:docker": "sh scripts/bootstrap-docker.sh"
   },
   "devDependencies": {
     "tsx": "^4.19.3",

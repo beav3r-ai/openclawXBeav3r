@@ -4,6 +4,7 @@ set -eu
 REPO_URL=${REPO_URL:-https://github.com/beav3r-ai/openclawXBeav3r.git}
 REPO_REF=${REPO_REF:-main}
 BOOTSTRAP_DIR=${BOOTSTRAP_DIR:-}
+BEAV3R_URL=${BEAV3R_URL:-${BEAV3R_SERVER_URL:-${BEAV3R_SERVER:-}}}
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -34,4 +35,9 @@ fi
 git clone --branch "$REPO_REF" --depth 1 "$REPO_URL" "$CLONE_DIR"
 
 cd "$CLONE_DIR"
+if [ -n "${BEAV3R_URL:-}" ]; then
+  echo "Bootstrapping OpenClaw bridge against $BEAV3R_URL"
+else
+  echo "Bootstrapping OpenClaw bridge against default https://api.beav3r.ai"
+fi
 sh scripts/install-docker.sh

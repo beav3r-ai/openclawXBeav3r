@@ -69,6 +69,8 @@ if [ ! -f "$ENV_FILE" ]; then
   cp "$EXAMPLE_FILE" "$ENV_FILE"
 fi
 
+BEAV3R_URL=${BEAV3R_URL:-${BEAV3R_SERVER_URL:-${BEAV3R_SERVER:-}}}
+
 get_existing() {
   key="$1"
   if [ ! -f "$ENV_FILE" ]; then
@@ -119,6 +121,7 @@ FALLBACK_HIGH=deny
 EOF
 
 echo "Starting OpenClaw x Beav3r services..."
+echo "Using Beav3r server: $BEAV3R_URL"
 (cd "$ROOT_DIR" && $COMPOSE_CMD up -d --build)
 
 cat <<EOF

@@ -11,10 +11,11 @@ curl -fsSL https://raw.githubusercontent.com/beav3r-ai/openclawXBeav3r/main/scri
 ```
 
 You only need:
-- a Beav3r API key
+- A Beav3r API key (https://beav3r.ai)
 - Docker running locally
 - OpenClaw reachable on the host machine
 
+## Advanced Setup (For self hosted)
 Optional overrides:
 
 ```bash

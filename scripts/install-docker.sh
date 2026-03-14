@@ -83,6 +83,8 @@ OPENCLAW_GATEWAY_URL=$(prompt_value "OPENCLAW_GATEWAY_URL" "OpenClaw gateway URL
 OPENCLAW_STATE_HOST_PATH=$(prompt_value "OPENCLAW_STATE_HOST_PATH" "OpenClaw state directory on host" "$HOME/.openclaw" "${OPENCLAW_STATE_HOST_PATH:-$(get_existing OPENCLAW_STATE_HOST_PATH)}")
 OPENCLAW_STATE_DIR=$(prompt_value "OPENCLAW_STATE_DIR" "OpenClaw state directory in container" "/openclaw-state" "${OPENCLAW_STATE_DIR:-$(get_existing OPENCLAW_STATE_DIR)}")
 PLUGIN_PUBLIC_URL=$(prompt_value "PLUGIN_PUBLIC_URL" "Plugin callback URL for the bridge" "http://plugin:7771" "${PLUGIN_PUBLIC_URL:-$(get_existing PLUGIN_PUBLIC_URL)}")
+PLUGIN_HOST_PORT=$(prompt_value "PLUGIN_HOST_PORT" "Host port to publish the plugin on" "7771" "${PLUGIN_HOST_PORT:-$(get_existing PLUGIN_HOST_PORT)}")
+BRIDGE_HOST_PORT=$(prompt_value "BRIDGE_HOST_PORT" "Host port to publish the bridge on" "7772" "${BRIDGE_HOST_PORT:-$(get_existing BRIDGE_HOST_PORT)}")
 CALLBACK_SECRET=$(get_existing CALLBACK_SECRET)
 if [ -z "$CALLBACK_SECRET" ]; then
   CALLBACK_SECRET=$(random_secret)
@@ -99,8 +101,10 @@ CALLBACK_KEY_ID=k1
 PLUGIN_PUBLIC_URL=$PLUGIN_PUBLIC_URL
 PLUGIN_HOST=0.0.0.0
 PLUGIN_PORT=7771
+PLUGIN_HOST_PORT=$PLUGIN_HOST_PORT
 BRIDGE_HOST=0.0.0.0
 BRIDGE_PORT=7772
+BRIDGE_HOST_PORT=$BRIDGE_HOST_PORT
 BRIDGE_URL=http://bridge:7772
 BEAV3R_TIMEOUT_MS=3000
 BRIDGE_POLL_MS=1500
@@ -122,8 +126,8 @@ cat <<EOF
 OpenClaw x Beav3r is up.
 
 Health checks:
-  curl http://127.0.0.1:7771/health
-  curl http://127.0.0.1:7772/health
+  curl http://127.0.0.1:$PLUGIN_HOST_PORT/health
+  curl http://127.0.0.1:$BRIDGE_HOST_PORT/health
   docker compose -f $ROOT_DIR/docker-compose.yml ps
 
 Logs:

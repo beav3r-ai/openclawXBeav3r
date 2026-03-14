@@ -24,7 +24,7 @@ services:
       FALLBACK_MEDIUM: ${FALLBACK_MEDIUM:-local}
       FALLBACK_HIGH: ${FALLBACK_HIGH:-deny}
     ports:
-      - "${BRIDGE_PORT:-7772}:7772"
+      - "${BRIDGE_HOST_PORT:-7772}:7772"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -60,7 +60,7 @@ services:
       FALLBACK_MEDIUM: ${FALLBACK_MEDIUM:-local}
       FALLBACK_HIGH: ${FALLBACK_HIGH:-deny}
     ports:
-      - "${PLUGIN_PORT:-7771}:7771"
+      - "${PLUGIN_HOST_PORT:-7771}:7771"
     volumes:
       - "${OPENCLAW_STATE_HOST_PATH:-$HOME/.openclaw}:${OPENCLAW_STATE_DIR:-/openclaw-state}:ro"
     extra_hosts:

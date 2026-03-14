@@ -80,11 +80,6 @@ docker compose down
 
 
 ## Current Beav3r API Alignment
-The bridge now uses Beav3r relay mode for OpenClaw approvals:
-- `POST {beav3r.baseUrl}/actions/relay`
-- `GET {beav3r.baseUrl}/actions/:actionId/status`
-- `POST {beav3r.baseUrl}/approvals/submit`
-- `POST {beav3r.baseUrl}/approvals/reject`
 
 Request mapping:
 - `actionId <- approvalId`

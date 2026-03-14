@@ -25,6 +25,19 @@ curl -fsSL https://raw.githubusercontent.com/beav3r-ai/openclawXBeav3r/main/scri
   sh
 ```
 
+For a local Beav3r server, pass it explicitly the same way as the API key:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/beav3r-ai/openclawXBeav3r/main/scripts/bootstrap-docker.sh | \
+  BEAV3R_API_KEY=bvr_test_replace_me \
+  BEAV3R_URL=http://host.docker.internal:3000 \
+  sh
+```
+
+Aliases also work:
+- `BEAV3R_SERVER_URL`
+- `BEAV3R_SERVER`
+
 Docker callback routing note:
 
 - the bridge calls back into the plugin over the Docker network

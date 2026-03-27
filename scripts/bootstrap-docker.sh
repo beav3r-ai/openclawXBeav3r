@@ -38,6 +38,6 @@ cd "$CLONE_DIR"
 if [ -n "${BEAV3R_URL:-}" ]; then
   echo "Bootstrapping OpenClaw bridge against $BEAV3R_URL"
 else
-  echo "Bootstrapping OpenClaw bridge against default https://api.beav3r.ai"
+  echo "Bootstrapping OpenClaw bridge against default https://server.beav3r.ai"
 fi
 sh scripts/install-docker.sh

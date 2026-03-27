@@ -21,7 +21,7 @@ Optional overrides:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/beav3r-ai/openclawXBeav3r/main/scripts/bootstrap-docker.sh | \
   BEAV3R_API_KEY=bvr_test_replace_me \
-  BEAV3R_URL=https://api.beav3r.ai \
+  BEAV3R_URL=https://server.beav3r.ai \
   OPENCLAW_GATEWAY_URL=ws://host.docker.internal:18789 \
   sh
 ```

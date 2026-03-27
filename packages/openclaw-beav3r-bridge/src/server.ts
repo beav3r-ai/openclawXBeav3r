@@ -27,7 +27,7 @@ const bridge = new OpenClawBeav3rBridge(
       high: (process.env.FALLBACK_HIGH as 'local' | 'deny' | undefined) ?? 'deny',
     },
     beav3r: {
-      baseUrl: process.env.BEAV3R_URL ?? 'https://api.beav3r.ai',
+      baseUrl: process.env.BEAV3R_URL ?? 'https://server.beav3r.ai',
       timeoutMs,
     },
     callback: {
@@ -42,7 +42,7 @@ const bridge = new OpenClawBeav3rBridge(
     },
   },
   new HttpBeav3rClient(
-    process.env.BEAV3R_URL ?? 'https://api.beav3r.ai',
+    process.env.BEAV3R_URL ?? 'https://server.beav3r.ai',
     timeoutMs,
     process.env.BEAV3R_API_KEY,
     `${publicUrl}/beav3r/webhook`
@@ -61,7 +61,7 @@ const server = app.listen(port, host, () => {
     port,
     publicUrl,
     stateDir,
-    beav3rUrl: process.env.BEAV3R_URL ?? 'https://api.beav3r.ai',
+    beav3rUrl: process.env.BEAV3R_URL ?? 'https://server.beav3r.ai',
     pollMs,
     logLevel: logger.getLevel(),
   });

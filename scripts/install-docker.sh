@@ -79,7 +79,7 @@ get_existing() {
   grep "^${key}=" "$ENV_FILE" | tail -n 1 | cut -d'=' -f2-
 }
 
-BEAV3R_URL=$(prompt_value "BEAV3R_URL" "Hosted Beav3r URL" "https://api.beav3r.ai" "${BEAV3R_URL:-$(get_existing BEAV3R_URL)}")
+BEAV3R_URL=$(prompt_value "BEAV3R_URL" "Hosted Beav3r URL" "https://server.beav3r.ai" "${BEAV3R_URL:-$(get_existing BEAV3R_URL)}")
 BEAV3R_API_KEY=$(prompt_value "BEAV3R_API_KEY" "Beav3r API key" "" "${BEAV3R_API_KEY:-$(get_existing BEAV3R_API_KEY)}")
 OPENCLAW_GATEWAY_URL=$(prompt_value "OPENCLAW_GATEWAY_URL" "OpenClaw gateway URL" "ws://host.docker.internal:18789" "${OPENCLAW_GATEWAY_URL:-$(get_existing OPENCLAW_GATEWAY_URL)}")
 OPENCLAW_STATE_HOST_PATH=$(prompt_value "OPENCLAW_STATE_HOST_PATH" "OpenClaw state directory on host" "$HOME/.openclaw" "${OPENCLAW_STATE_HOST_PATH:-$(get_existing OPENCLAW_STATE_HOST_PATH)}")

@@ -140,7 +140,7 @@ describe('HttpBeav3rClient (beaver endpoint contract)', () => {
     const client = new HttpBeav3rClient('http://localhost:3000', 1000);
 
     await expect(client.submitApproval({ actionHash: 'h', deviceId: 'd1', signature: 'sig', expiry: 1 })).resolves.toEqual({ status: 'executed', actionId: 'a1' });
-    await expect(client.rejectApproval({ actionHash: 'h', deviceId: 'd1' })).resolves.toEqual({ status: 'rejected', actionId: 'a1' });
+    await expect(client.rejectApproval({ actionHash: 'h', deviceId: 'd1', signature: 'sig', expiry: 1 })).resolves.toEqual({ status: 'rejected', actionId: 'a1' });
 
     expect(mockFetch.mock.calls[0][0]).toBe('http://localhost:3000/approvals/submit');
     expect(mockFetch.mock.calls[1][0]).toBe('http://localhost:3000/approvals/reject');

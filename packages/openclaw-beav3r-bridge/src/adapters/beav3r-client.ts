@@ -36,7 +36,7 @@ export interface Beav3rClient {
       }
   >;
   submitApproval?(input: { actionHash: string; deviceId: string; signature: string; expiry: number }): Promise<{ status: 'executed'; actionId: string }>;
-  rejectApproval?(input: { actionHash: string; deviceId: string }): Promise<{ status: 'rejected'; actionId: string }>;
+  rejectApproval?(input: { actionHash: string; deviceId: string; signature: string; expiry: number }): Promise<{ status: 'rejected'; actionId: string }>;
 }
 
 export class HttpBeav3rClient implements Beav3rClient {
@@ -128,7 +128,7 @@ export class HttpBeav3rClient implements Beav3rClient {
     return (await res.json()) as { status: 'executed'; actionId: string };
   }
 
-  async rejectApproval(input: { actionHash: string; deviceId: string }) {
+  async rejectApproval(input: { actionHash: string; deviceId: string; signature: string; expiry: number }) {
     const res = await this.request('/approvals/reject', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

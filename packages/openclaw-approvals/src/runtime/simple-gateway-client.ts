@@ -35,6 +35,7 @@ type SimpleGatewayClientOptions = {
   onConnectError?: (err: Error) => void;
   onClose?: (code: number, reason: string) => void;
   reconnectDelayMs?: number;
+  reconnectIntervalMs?: number;
   reconnectMaxDelayMs?: number;
 };
 
@@ -79,13 +80,11 @@ export class SimpleGatewayClient {
   private stopped = false;
   private connectRequestId: string | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
-  private reconnectAttempt = 0;
 
   constructor(private readonly opts: SimpleGatewayClientOptions) {}
 
   start(): void {
     this.stopped = false;
-    this.reconnectAttempt = 0;
     this.open();
   }
 
@@ -140,7 +139,6 @@ export class SimpleGatewayClient {
     this.socket = socket;
 
     socket.addEventListener('open', () => {
-      this.reconnectAttempt = 0;
       // wait for connect.challenge
     });
 
@@ -151,11 +149,24 @@ export class SimpleGatewayClient {
     socket.addEventListener('error', (event) => {
       const err = asError((event as ErrorEvent).error ?? new Error('Gateway websocket error'));
       this.opts.onConnectError?.(err);
+      if (this.stopped || this.socket !== socket || socket.readyState === WebSocket.OPEN) {
+        return;
+      }
+      this.socket = null;
+      this.scheduleReconnect();
+      try {
+        socket.close();
+      } catch {
+        // Ignore close races while the runtime waits for the next reconnect tick.
+      }
     });
 
     socket.addEventListener('close', (event) => {
-      this.socket = null;
       this.opts.onClose?.(event.code, event.reason);
+      if (this.socket !== socket) {
+        return;
+      }
+      this.socket = null;
       if (!this.stopped) {
         for (const pending of this.pending.values()) {
           pending.reject(new Error('Gateway websocket closed'));
@@ -167,14 +178,11 @@ export class SimpleGatewayClient {
   }
 
   private scheduleReconnect(): void {
-    if (this.stopped || this.reconnectTimer) {
+    if (this.stopped || this.reconnectTimer || this.socket) {
       return;
     }
 
-    const baseDelay = this.opts.reconnectDelayMs ?? 1000;
-    const maxDelay = this.opts.reconnectMaxDelayMs ?? 15000;
-    const delayMs = Math.min(baseDelay * 2 ** this.reconnectAttempt, maxDelay);
-    this.reconnectAttempt += 1;
+    const delayMs = this.opts.reconnectIntervalMs ?? this.opts.reconnectDelayMs ?? 1000;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (!this.stopped && !this.socket) {

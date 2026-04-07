@@ -23,6 +23,7 @@ type GatewayRuntimeOptions = {
   url?: string;
   token?: string;
   password?: string;
+  reconnectIntervalMs?: number;
   onEventLog?: (event: string, data: Record<string, unknown>) => void;
   clientCtor?: GatewayClientCtor;
 };
@@ -43,6 +44,19 @@ class GatewayEventBus implements OpenClawEventBusLike {
       await handler(frame.payload);
     }
   }
+}
+
+function resolveReconnectIntervalMs(explicit?: number): number {
+  if (typeof explicit === 'number' && Number.isFinite(explicit) && explicit > 0) {
+    return explicit;
+  }
+
+  const fromEnv = Number(process.env.OPENCLAW_GATEWAY_RECONNECT_INTERVAL_MS ?? '3000');
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+
+  return 3000;
 }
 
 class GatewayApprovalsApi implements OpenClawApprovalsApiLike {
@@ -77,6 +91,7 @@ export function createGatewayRuntime(options: GatewayRuntimeOptions): {
     url: options.url ?? process.env.OPENCLAW_GATEWAY_URL ?? HARDCODED_OPENCLAW_GATEWAY_URL,
     token: options.token ?? process.env.OPENCLAW_GATEWAY_TOKEN,
     password: options.password ?? process.env.OPENCLAW_GATEWAY_PASSWORD,
+    reconnectIntervalMs: resolveReconnectIntervalMs(options.reconnectIntervalMs),
     clientName: 'gateway-client',
     clientDisplayName: 'Beav3r Approvals',
     mode: 'backend',
